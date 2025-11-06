@@ -6,6 +6,7 @@ A comprehensive Python utility for fetching and analyzing vulnerability data fro
 
 - **Data Fetching & Caching:**
   - Fetches all vulnerabilities from your Vanta account
+  - Captures vulnerability remediation records for every asset and integration
   - Local SQLite database for caching vulnerability data
   - Automatic rate limit handling with retry logic
   - Reduces API calls by using cached data
@@ -15,6 +16,7 @@ A comprehensive Python utility for fetching and analyzing vulnerability data fro
   - Tracks when vulnerabilities are remediated
   - Historical snapshots of vulnerability changes
   - Sync history with statistics on new, updated, and remediated vulnerabilities
+  - Stores every element from the Vanta vulnerabilities and vulnerability remediations APIs for downstream analytics
 
 - **Comprehensive Statistics:**
   - Total vulnerability counts
@@ -90,6 +92,7 @@ The utility automatically:
 - Uses cached data by default if available
 - Tracks changes between syncs (new vulnerabilities, remediated ones, etc.)
 - Stores historical snapshots for trend analysis
+- Persists vulnerability remediations and a flattened catalog of every API field for advanced querying
 
 ### Filtering Examples
 

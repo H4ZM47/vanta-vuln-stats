@@ -15,7 +15,7 @@ import time
 from datetime import datetime
 from typing import Dict, List, Optional, Any, Callable
 from collections import defaultdict
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor
 from threading import Lock
 
 import requests
@@ -52,7 +52,12 @@ class VantaAPIClient:
         except requests.exceptions.RequestException as e:
             raise Exception(f"Authentication failed: {str(e)}")
 
-    def get_vulnerabilities(self, page_size: int = 100, batch_callback: Optional[Callable[[List[Dict]], None]] = None, **filters) -> List[Dict]:
+    def get_vulnerabilities(
+        self,
+        page_size: int = 100,
+        batch_callback: Optional[Callable[[List[Dict]], None]] = None,
+        **filters
+    ) -> List[Dict]:
         """
         Fetch all vulnerabilities with optional filters
 
@@ -130,6 +135,78 @@ class VantaAPIClient:
 
         return all_vulnerabilities
 
+    def get_vulnerability_remediations(
+        self,
+        page_size: int = 100,
+        batch_callback: Optional[Callable[[List[Dict]], None]] = None,
+        **filters
+    ) -> List[Dict]:
+        """Fetch all vulnerability remediation records with optional filters."""
+
+        if not self.access_token:
+            self.authenticate()
+
+        all_remediations: List[Dict] = []
+        page_cursor = None
+
+        while True:
+            url = f"{self.base_url}/vulnerability-remediations"
+            params: Dict[str, Any] = {"pageSize": page_size}
+
+            for key, value in filters.items():
+                if value is not None:
+                    params[key] = value
+
+            if page_cursor:
+                params["pageCursor"] = page_cursor
+
+            headers = {
+                "Authorization": f"Bearer {self.access_token}",
+                "Content-Type": "application/json",
+            }
+
+            try:
+                response = requests.get(url, params=params, headers=headers)
+
+                if response.status_code == 429:
+                    retry_after = int(response.headers.get("Retry-After", 60))
+                    print(
+                        f"Rate limit hit. Waiting {retry_after} seconds...",
+                        file=sys.stderr,
+                    )
+                    time.sleep(retry_after)
+                    continue
+
+                response.raise_for_status()
+                data = response.json()
+
+                results_obj = data.get("results", {})
+                remediations_list = results_obj.get("data", [])
+                all_remediations.extend(remediations_list)
+
+                if batch_callback and remediations_list:
+                    batch_callback(remediations_list)
+
+                page_info = results_obj.get("pageInfo", {})
+                has_next_page = page_info.get("hasNextPage", False)
+                page_cursor = page_info.get("endCursor") if has_next_page else None
+
+                time.sleep(0.5)
+
+                if not has_next_page:
+                    break
+
+            except requests.exceptions.RequestException as e:
+                if "429" in str(e):
+                    print("Rate limit hit. Waiting 60 seconds...", file=sys.stderr)
+                    time.sleep(60)
+                    continue
+                raise Exception(
+                    f"Failed to fetch vulnerability remediations: {str(e)}"
+                )
+
+        return all_remediations
+
 
 class VulnerabilityDatabase:
     """SQLite database for storing and retrieving vulnerability data"""
@@ -172,6 +249,39 @@ class VulnerabilityDatabase:
                 raw_data TEXT
             )
         """)
+
+        cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS vulnerability_remediations (
+                id TEXT PRIMARY KEY,
+                vulnerability_id TEXT,
+                vulnerable_asset_id TEXT,
+                severity TEXT,
+                detected_date TEXT,
+                sla_deadline_date TEXT,
+                remediation_date TEXT,
+                is_remediated_on_time BOOLEAN,
+                integration_id TEXT,
+                integration_type TEXT,
+                status TEXT,
+                last_updated TEXT,
+                raw_data TEXT
+            )
+            """
+        )
+
+        cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS data_elements (
+                record_type TEXT NOT NULL,
+                record_id TEXT NOT NULL,
+                element_path TEXT NOT NULL,
+                element_value TEXT,
+                last_updated TEXT NOT NULL,
+                PRIMARY KEY (record_type, record_id, element_path)
+            )
+            """
+        )
 
         # History table to track changes over time
         cursor.execute("""
@@ -220,6 +330,103 @@ class VulnerabilityDatabase:
         cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_history_snapshot_date ON vulnerability_history(snapshot_date)
         """)
+        cursor.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_data_elements_record
+            ON data_elements(record_type, record_id)
+            """
+        )
+
+        self.conn.commit()
+        self._backfill_data_elements()
+
+    def _normalize_for_storage(self, value: Any) -> str:
+        """Normalize Python values into JSON strings for storage."""
+
+        return json.dumps(value, sort_keys=True)
+
+    def _flatten_data(self, data: Any, parent_key: str = "") -> List[tuple]:
+        """Flatten nested data structures to key paths and values."""
+
+        items: List[tuple] = []
+
+        if isinstance(data, dict):
+            if parent_key:
+                items.append((parent_key, data))
+            for key, value in data.items():
+                new_key = f"{parent_key}.{key}" if parent_key else key
+                items.extend(self._flatten_data(value, new_key))
+        elif isinstance(data, list):
+            if parent_key:
+                items.append((parent_key, data))
+            for index, value in enumerate(data):
+                new_key = f"{parent_key}[{index}]" if parent_key else f"[{index}]"
+                items.extend(self._flatten_data(value, new_key))
+        else:
+            items.append((parent_key, data))
+
+        return items
+
+    def _store_data_elements(
+        self,
+        cursor: sqlite3.Cursor,
+        record_type: str,
+        record_id: str,
+        data: Dict[str, Any],
+        timestamp: str,
+    ) -> None:
+        """Store flattened data elements for a record."""
+
+        cursor.execute(
+            "DELETE FROM data_elements WHERE record_type = ? AND record_id = ?",
+            (record_type, record_id),
+        )
+
+        elements = [("__root__", data)] + self._flatten_data(data)
+
+        for path, value in elements:
+            cursor.execute(
+                """
+                INSERT OR REPLACE INTO data_elements (
+                    record_type,
+                    record_id,
+                    element_path,
+                    element_value,
+                    last_updated
+                ) VALUES (?, ?, ?, ?, ?)
+                """,
+                (
+                    record_type,
+                    record_id,
+                    path,
+                    self._normalize_for_storage(value),
+                    timestamp,
+                ),
+            )
+
+    def _backfill_data_elements(self) -> None:
+        """Ensure data elements exist for previously stored records."""
+
+        cursor = self.conn.cursor()
+
+        cursor.execute("SELECT COUNT(*) AS count FROM data_elements")
+        count = cursor.fetchone()["count"]
+        if count:
+            return
+
+        now = datetime.utcnow().isoformat()
+
+        cursor.execute("SELECT id, raw_data FROM vulnerabilities")
+        for row in cursor.fetchall():
+            data = json.loads(row["raw_data"]) if row["raw_data"] else {}
+            self._store_data_elements(cursor, "vulnerability", row["id"], data, now)
+
+        cursor.execute("SELECT id, raw_data FROM vulnerability_remediations")
+        for row in cursor.fetchall():
+            data = json.loads(row["raw_data"]) if row["raw_data"] else {}
+            self._store_data_elements(
+                cursor, "vulnerability_remediation", row["id"], data, now
+            )
 
         self.conn.commit()
 
@@ -309,6 +516,10 @@ class VulnerabilityDatabase:
                     json.dumps(vuln)
                 ))
 
+                self._store_data_elements(
+                    cursor, "vulnerability", vuln_id, vuln, current_time
+                )
+
                 # Add to history if there was a change
                 if track_changes and change_type:
                     is_deactivated = vuln.get('deactivateMetadata') is not None
@@ -346,12 +557,101 @@ class VulnerabilityDatabase:
                 'total': len(vulnerabilities)
             }
 
+    def store_vulnerability_remediations(self, remediations: List[Dict]) -> Dict[str, int]:
+        """Store vulnerability remediation records in the database."""
+
+        with self._write_lock:
+            cursor = self.conn.cursor()
+            current_time = datetime.utcnow().isoformat()
+
+            new_count = 0
+            updated_count = 0
+
+            for remediation in remediations:
+                remediation_id = remediation.get("id")
+                if not remediation_id:
+                    continue
+
+                cursor.execute(
+                    "SELECT raw_data FROM vulnerability_remediations WHERE id = ?",
+                    (remediation_id,),
+                )
+                existing = cursor.fetchone()
+
+                if existing is None:
+                    new_count += 1
+                else:
+                    old_data = json.loads(existing["raw_data"]) if existing["raw_data"] else {}
+                    if json.dumps(old_data, sort_keys=True) != json.dumps(
+                        remediation, sort_keys=True
+                    ):
+                        updated_count += 1
+
+                cursor.execute(
+                    """
+                    INSERT OR REPLACE INTO vulnerability_remediations (
+                        id,
+                        vulnerability_id,
+                        vulnerable_asset_id,
+                        severity,
+                        detected_date,
+                        sla_deadline_date,
+                        remediation_date,
+                        is_remediated_on_time,
+                        integration_id,
+                        integration_type,
+                        status,
+                        last_updated,
+                        raw_data
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        remediation_id,
+                        remediation.get("vulnerabilityId"),
+                        remediation.get("vulnerableAssetId"),
+                        remediation.get("severity"),
+                        remediation.get("detectedDate"),
+                        remediation.get("slaDeadlineDate"),
+                        remediation.get("remediationDate"),
+                        remediation.get("isRemediatedOnTime"),
+                        remediation.get("integrationId"),
+                        remediation.get("integrationType"),
+                        remediation.get("status"),
+                        current_time,
+                        json.dumps(remediation),
+                    ),
+                )
+
+                self._store_data_elements(
+                    cursor,
+                    "vulnerability_remediation",
+                    remediation_id,
+                    remediation,
+                    current_time,
+                )
+
+            self.conn.commit()
+
+            return {
+                "new": new_count,
+                "updated": updated_count,
+                "total": len(remediations),
+            }
+
     def get_all_vulnerabilities(self) -> List[Dict]:
         """Retrieve all vulnerabilities from the database"""
         cursor = self.conn.cursor()
         cursor.execute("SELECT raw_data FROM vulnerabilities")
         rows = cursor.fetchall()
         return [json.loads(row['raw_data']) for row in rows]
+
+    def get_all_vulnerability_remediations(self) -> List[Dict]:
+        """Retrieve all vulnerability remediations from the database."""
+
+        cursor = self.conn.cursor()
+        cursor.execute("SELECT raw_data FROM vulnerability_remediations")
+        rows = cursor.fetchall()
+        return [json.loads(row["raw_data"]) for row in rows if row["raw_data"]]
 
     def get_last_update_time(self) -> Optional[str]:
         """Get the timestamp of the last database update"""
@@ -784,12 +1084,60 @@ Examples:
                 total_stats['remediated'] += batch_stats.get('remediated', 0)
                 total_stats['total'] += batch_stats.get('total', 0)
 
+            # Fetch vulnerability remediations
+            if args.verbose:
+                print("Fetching vulnerability remediations from API...")
+
+            remediation_buffer: List[Dict] = []
+            remediation_lock = Lock()
+            remediation_futures: List[Any] = []
+
+            def remediation_write_batch(batch: List[Dict]) -> Dict[str, int]:
+                return db.store_vulnerability_remediations(batch)
+
+            def remediation_batch_callback(batch: List[Dict]) -> None:
+                nonlocal remediation_buffer
+                with remediation_lock:
+                    remediation_buffer.extend(batch)
+                    if len(remediation_buffer) >= 100:
+                        batch_to_write = remediation_buffer[:100]
+                        remediation_buffer = remediation_buffer[100:]
+                        remediation_future = executor.submit(
+                            remediation_write_batch, batch_to_write
+                        )
+                        remediation_futures.append(remediation_future)
+
+            # Need a fresh executor because the previous one has been shut down
+            executor = ThreadPoolExecutor(max_workers=4)
+
+            remediations = client.get_vulnerability_remediations(
+                batch_callback=remediation_batch_callback
+            )
+
+            if remediation_buffer:
+                remediation_future = executor.submit(
+                    remediation_write_batch, remediation_buffer
+                )
+                remediation_futures.append(remediation_future)
+
+            executor.shutdown(wait=True)
+
+            remediation_stats = {"new": 0, "updated": 0, "total": 0}
+            for remediation_future in remediation_futures:
+                batch_stats = remediation_future.result()
+                remediation_stats["new"] += batch_stats.get("new", 0)
+                remediation_stats["updated"] += batch_stats.get("updated", 0)
+                remediation_stats["total"] += batch_stats.get("total", 0)
+
             if args.verbose or args.sync:
                 print(f"\nSync Summary:")
                 print(f"  Total: {total_stats['total']}")
                 print(f"  New: {total_stats['new']}")
                 print(f"  Updated: {total_stats['updated']}")
                 print(f"  Remediated: {total_stats['remediated']}")
+                print(f"  Remediation Records Synced: {remediation_stats['total']}")
+                print(f"    New Remediations: {remediation_stats['new']}")
+                print(f"    Updated Remediations: {remediation_stats['updated']}")
                 print()
         else:
             # Use cached data
