@@ -492,8 +492,8 @@ class VulnerabilityStats:
 
         for vuln in vulnerabilities:
             # Count by severity
-            severity = vuln.get('severity', 'UNKNOWN')
-            stats['by_severity'][severity] += 1
+            severity_value = vuln.get('severity') or 'UNKNOWN'
+            stats['by_severity'][severity_value] += 1
 
             # Count by integration source
             integration = vuln.get('integrationId', 'UNKNOWN')
@@ -521,8 +521,9 @@ class VulnerabilityStats:
 
             # Collect CVSS scores by severity
             cvss_score = vuln.get('cvssSeverityScore')
-            if cvss_score and severity:
-                stats['severity_scores'][severity.lower()].append(cvss_score)
+            severity_key = severity_value.lower()
+            if cvss_score is not None:
+                stats['severity_scores'].setdefault(severity_key, []).append(cvss_score)
 
         # Convert sets to counts
         stats['unique_assets_count'] = len(stats['unique_assets'])
