@@ -21,6 +21,8 @@ from PySide6 import QtCore, QtGui, QtWidgets
 from core.stats import VulnerabilityStats
 from gui.credentials_dialog import CredentialsDialog
 from gui.credentials_manager import CredentialsManager
+from gui.dashboard import DashboardWidget
+from gui.detail_panel import VulnerabilityDetailPanel
 from gui.models import VulnerabilitySortFilterProxyModel, VulnerabilityTableModel
 from gui.network_monitor import NetworkMonitor
 from gui.settings_manager import SettingsManager
@@ -125,6 +127,17 @@ class MainWindow(QtWidgets.QMainWindow):
         self.proxy_model = VulnerabilitySortFilterProxyModel()
         self.proxy_model.setSourceModel(self.vuln_model)
 
+        # Detail and dashboard widgets
+        self.detail_panel = VulnerabilityDetailPanel()
+        self.detail_panel.setMinimumWidth(320)
+        self.dashboard_widget = DashboardWidget()
+
+        # Live filter debounce timer
+        self._filter_timer = QtCore.QTimer(self)
+        self._filter_timer.setInterval(300)
+        self._filter_timer.setSingleShot(True)
+        self._filter_timer.timeout.connect(self.apply_filters)
+
         # Initialize settings manager
         self.settings_manager = SettingsManager()
 
@@ -169,7 +182,12 @@ class MainWindow(QtWidgets.QMainWindow):
         main_layout.addWidget(self._build_path_controls())
         main_layout.addWidget(self._build_filter_group())
         main_layout.addWidget(self._build_stats_group())
-        main_layout.addWidget(self._build_table())
+        content_splitter = QtWidgets.QSplitter(QtCore.Qt.Orientation.Horizontal)
+        content_splitter.addWidget(self._build_table())
+        content_splitter.addWidget(self.detail_panel)
+        content_splitter.setStretchFactor(0, 3)
+        content_splitter.setStretchFactor(1, 2)
+        main_layout.addWidget(content_splitter, 1)
         main_layout.addWidget(self._build_log_view())
 
     def _build_path_controls(self) -> QtWidgets.QGroupBox:
@@ -214,6 +232,8 @@ class MainWindow(QtWidgets.QMainWindow):
     def _build_filter_group(self) -> QtWidgets.QGroupBox:
         group = QtWidgets.QGroupBox("Filters")
         layout = QtWidgets.QGridLayout(group)
+        layout.setHorizontalSpacing(8)
+        layout.setVerticalSpacing(6)
 
         self.date_identified_start_edit = QtWidgets.QLineEdit()
         self.date_identified_start_edit.setPlaceholderText("YYYY-MM-DDTHH:MM:SSZ")
@@ -252,11 +272,55 @@ class MainWindow(QtWidgets.QMainWindow):
         layout.addWidget(QtWidgets.QLabel("Asset ID"), 6, 0)
         layout.addWidget(self.asset_edit, 6, 1, 1, 2)
 
+        button_layout = QtWidgets.QHBoxLayout()
+        self.clear_filters_button = QtWidgets.QPushButton("Clear Filters")
+        self.load_filter_button = QtWidgets.QPushButton("Load Preset…")
+        self.save_filter_button = QtWidgets.QPushButton("Save Preset")
+        button_layout.addWidget(self.clear_filters_button)
+        button_layout.addWidget(self.load_filter_button)
+        button_layout.addWidget(self.save_filter_button)
+        button_layout.addStretch()
+
+        layout.addLayout(button_layout, 7, 0, 1, 7)
+
+        self.clear_filters_button.clicked.connect(self._new_filter)
+        self.load_filter_button.clicked.connect(self._open_filter)
+        self.save_filter_button.clicked.connect(self._save_filter)
+
+        self._connect_filter_inputs()
+
         return group
 
+    def _connect_filter_inputs(self) -> None:
+        """Connect filter input widgets to live filtering."""
+        inputs = [
+            self.date_identified_start_edit,
+            self.date_identified_end_edit,
+            self.date_remediated_start_edit,
+            self.date_remediated_end_edit,
+            self.cve_edit,
+            self.asset_edit,
+        ]
+        for widget in inputs:
+            widget.textChanged.connect(self._on_filter_input_changed)
+
+        for checkbox in self.severity_checkboxes.values():
+            checkbox.stateChanged.connect(self._on_filter_input_changed)
+
+    def _on_filter_input_changed(self) -> None:
+        """Trigger a debounced filter application when inputs change."""
+        if not self.all_vulnerabilities:
+            return
+        self._filter_timer.start()
+
     def _build_stats_group(self) -> QtWidgets.QGroupBox:
-        group = QtWidgets.QGroupBox("Statistics")
-        layout = QtWidgets.QGridLayout(group)
+        group = QtWidgets.QGroupBox("Statistics & Dashboard")
+        layout = QtWidgets.QVBoxLayout(group)
+        layout.setSpacing(12)
+
+        metrics_grid = QtWidgets.QGridLayout()
+        metrics_grid.setHorizontalSpacing(12)
+        metrics_grid.setVerticalSpacing(6)
 
         self.stats_labels: Dict[str, QtWidgets.QLabel] = {}
         stat_fields = [
@@ -272,17 +336,20 @@ class MainWindow(QtWidgets.QMainWindow):
         for row, (key, label) in enumerate(stat_fields):
             widget = QtWidgets.QLabel("0")
             widget.setObjectName(key)
-            layout.addWidget(QtWidgets.QLabel(label), row, 0)
-            layout.addWidget(widget, row, 1)
+            metrics_grid.addWidget(QtWidgets.QLabel(label), row, 0)
+            metrics_grid.addWidget(widget, row, 1)
             self.stats_labels[key] = widget
 
         self.severity_stats: Dict[str, QtWidgets.QLabel] = {}
         severity_names = ["CRITICAL", "HIGH", "MEDIUM", "LOW"]
         for idx, severity in enumerate(severity_names):
             label = QtWidgets.QLabel("0")
-            layout.addWidget(QtWidgets.QLabel(severity.title()), idx, 2)
-            layout.addWidget(label, idx, 3)
+            metrics_grid.addWidget(QtWidgets.QLabel(severity.title()), idx, 2)
+            metrics_grid.addWidget(label, idx, 3)
             self.severity_stats[severity] = label
+
+        layout.addLayout(metrics_grid)
+        layout.addWidget(self.dashboard_widget)
 
         return group
 
@@ -487,7 +554,10 @@ class MainWindow(QtWidgets.QMainWindow):
         return True
 
     def apply_filters(self) -> None:
+        self._filter_timer.stop()
         if not self.all_vulnerabilities:
+            self.dashboard_widget.clear()
+            self.detail_panel.display_vulnerability(None)
             self.append_log("No data loaded yet.")
             return
 
@@ -545,6 +615,8 @@ class MainWindow(QtWidgets.QMainWindow):
         for severity, label in self.severity_stats.items():
             label.setText(str(stats.get("by_severity", {}).get(severity, 0)))
 
+        self.dashboard_widget.update_data(stats, self.filtered_vulnerabilities)
+
     def _populate_table(self) -> None:
         """Populate the table with filtered vulnerability data using the model."""
         # Update the model with filtered data
@@ -552,6 +624,12 @@ class MainWindow(QtWidgets.QMainWindow):
 
         # Update the status bar
         self._update_status_bar()
+
+        if self.filtered_vulnerabilities:
+            self.table.selectRow(0)
+        else:
+            self.table.clearSelection()
+            self.detail_panel.display_vulnerability(None)
 
     def _export_filtered(self) -> None:
         if not self.filtered_vulnerabilities:
@@ -854,6 +932,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.asset_edit.clear()
         for checkbox in self.severity_checkboxes.values():
             checkbox.setChecked(False)
+        self._current_filter_name = None
         self.apply_filters()
         self.append_log("Filters cleared")
 
@@ -873,6 +952,7 @@ class MainWindow(QtWidgets.QMainWindow):
             filters = self.settings_manager.get_filter_preset(preset_name)
             if filters:
                 self._apply_filter_preset(filters)
+                self._current_filter_name = preset_name
                 self.append_log(f"Loaded filter preset: {preset_name}")
 
     def _save_filter(self) -> None:
@@ -1242,6 +1322,21 @@ Save commonly-used filter combinations with File → Save Filter.</p>
     def _on_selection_changed(self) -> None:
         """Handle table selection changes."""
         self._update_status_bar()
+
+        selection_model = self.table.selectionModel()
+        if not selection_model:
+            self.detail_panel.display_vulnerability(None)
+            return
+
+        selected_rows = selection_model.selectedRows()
+        if len(selected_rows) == 1:
+            source_index = self.proxy_model.mapToSource(selected_rows[0])
+            vuln = self.vuln_model.getVulnerability(source_index.row())
+            self.detail_panel.display_vulnerability(vuln)
+        elif len(selected_rows) > 1:
+            self.detail_panel.display_selection_summary(len(selected_rows))
+        else:
+            self.detail_panel.display_vulnerability(None)
 
     def closeEvent(self, event: QtGui.QCloseEvent) -> None:
         """Handle window close event to save settings."""

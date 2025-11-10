@@ -1,0 +1,6 @@
+<svg width="24" height="24" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Critical severity">
+  <title>Critical severity</title>
+  <circle cx="12" cy="12" r="10" fill="#C82333" />
+  <rect x="11" y="6" width="2" height="9" rx="1" fill="#FFFFFF" />
+  <rect x="11" y="17" width="2" height="2" rx="1" fill="#FFFFFF" />
+</svg>

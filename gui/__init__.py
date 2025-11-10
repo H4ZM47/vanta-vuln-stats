@@ -8,6 +8,8 @@ secure credential management, settings persistence, data models, workers, and UI
 from gui.credentials_dialog import CredentialsDialog
 from gui.credentials_manager import CredentialsManager
 from gui.database_manager import DatabaseCache, DatabaseConnectionPool, DatabaseManager
+from gui.dashboard import DashboardWidget
+from gui.detail_panel import VulnerabilityDetailPanel
 from gui.models import VulnerabilitySortFilterProxyModel, VulnerabilityTableModel
 from gui.network_monitor import NetworkMonitor
 from gui.settings_manager import SettingsManager
@@ -32,4 +34,6 @@ __all__ = [
     "DatabaseConnectionPool",
     "DatabaseCache",
     "NetworkMonitor",
+    "DashboardWidget",
+    "VulnerabilityDetailPanel",
 ]
