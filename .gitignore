@@ -1,9 +1,13 @@
 .DS_Store
 vanta_vulnerabilities.db
 .venv/
+venv/
 __pycache__/
 *.pyc
 *.pyo
 *.egg-info/
 dist/
 build/
+*.dmg
+dmg_temp/
+*.app
