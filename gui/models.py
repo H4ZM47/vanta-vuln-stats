@@ -7,6 +7,7 @@ of large datasets with sorting, filtering, and lazy loading.
 """
 
 from datetime import datetime
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from PySide6 import QtCore, QtGui
@@ -44,12 +45,29 @@ class VulnerabilityTableModel(QtCore.QAbstractTableModel):
     COL_LAST_DETECTED = 7
     COL_SOURCE = 8
 
-    # Severity colors
-    SEVERITY_COLORS = {
-        "CRITICAL": QtGui.QColor(220, 53, 69),   # Red
-        "HIGH": QtGui.QColor(255, 193, 7),        # Amber
-        "MEDIUM": QtGui.QColor(255, 152, 0),      # Orange
-        "LOW": QtGui.QColor(76, 175, 80),         # Green
+    # Severity presentation (background/foreground/icon)
+    _BASE_PATH = Path(__file__).resolve().parent
+    SEVERITY_STYLES = {
+        "CRITICAL": {
+            "background": QtGui.QColor("#F8D7DA"),
+            "foreground": QtGui.QColor("#842029"),
+            "icon": _BASE_PATH / "icons" / "severity-critical.svg",
+        },
+        "HIGH": {
+            "background": QtGui.QColor("#FFE5D0"),
+            "foreground": QtGui.QColor("#7F2E0F"),
+            "icon": _BASE_PATH / "icons" / "severity-high.svg",
+        },
+        "MEDIUM": {
+            "background": QtGui.QColor("#FFF3CD"),
+            "foreground": QtGui.QColor("#664D03"),
+            "icon": _BASE_PATH / "icons" / "severity-medium.svg",
+        },
+        "LOW": {
+            "background": QtGui.QColor("#D1E7FF"),
+            "foreground": QtGui.QColor("#084298"),
+            "icon": _BASE_PATH / "icons" / "severity-low.svg",
+        },
     }
 
     def __init__(self, parent: Optional[QtCore.QObject] = None):
@@ -57,6 +75,7 @@ class VulnerabilityTableModel(QtCore.QAbstractTableModel):
         self._data: List[Dict[str, Any]] = []
         self._sort_column: int = self.COL_FIRST_DETECTED
         self._sort_order: QtCore.Qt.SortOrder = QtCore.Qt.SortOrder.DescendingOrder
+        self._severity_icons: Dict[str, QtGui.QIcon] = {}
 
     def rowCount(self, parent: QtCore.QModelIndex = QtCore.QModelIndex()) -> int:
         """Return the number of rows in the model."""
@@ -85,12 +104,21 @@ class VulnerabilityTableModel(QtCore.QAbstractTableModel):
         elif role == QtCore.Qt.ItemDataRole.BackgroundRole:
             if col == self.COL_SEVERITY:
                 severity = vuln.get("severity", "")
-                return self.SEVERITY_COLORS.get(severity)
+                style = self.SEVERITY_STYLES.get(severity)
+                if style:
+                    return QtGui.QBrush(style["background"])
 
         elif role == QtCore.Qt.ItemDataRole.ForegroundRole:
             if col == self.COL_SEVERITY:
-                # White text on colored background
-                return QtGui.QColor(255, 255, 255)
+                severity = vuln.get("severity", "")
+                style = self.SEVERITY_STYLES.get(severity)
+                if style:
+                    return style["foreground"]
+
+        elif role == QtCore.Qt.ItemDataRole.DecorationRole:
+            if col == self.COL_SEVERITY:
+                severity = vuln.get("severity", "")
+                return self._get_severity_icon(severity)
 
         elif role == QtCore.Qt.ItemDataRole.FontRole:
             if col == self.COL_SEVERITY:
@@ -160,6 +188,24 @@ class VulnerabilityTableModel(QtCore.QAbstractTableModel):
                 parts.append(f"Scanner: {scanner}")
             return "\n".join(parts)
         return None
+
+    def _get_severity_icon(self, severity: str) -> Optional[QtGui.QIcon]:
+        """Return cached severity icon for the given severity level."""
+        if not severity:
+            return None
+
+        if severity not in self._severity_icons:
+            style = self.SEVERITY_STYLES.get(severity)
+            if not style:
+                self._severity_icons[severity] = None
+            else:
+                icon_path = style.get("icon")
+                if icon_path and icon_path.exists():
+                    self._severity_icons[severity] = QtGui.QIcon(str(icon_path))
+                else:
+                    self._severity_icons[severity] = None
+
+        return self._severity_icons.get(severity)
 
     def _format_date(self, date_str: str) -> str:
         """Format ISO date string to readable format."""
