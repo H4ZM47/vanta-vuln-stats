@@ -1,0 +1,19 @@
+# AWS Lambda Requirements
+# These dependencies are optimized for Lambda deployment with performance in mind
+
+# AWS SDK and services
+boto3>=1.34.0
+botocore>=1.34.0
+
+# Data processing (required for Parquet support)
+pyarrow>=14.0.0
+pandas>=2.1.0
+
+# Lambda Powertools for observability
+aws-lambda-powertools[tracer]>=2.30.0
+
+# Core dependencies (lightweight)
+requests>=2.31.0
+
+# Optimization: These libraries support lazy loading and connection pooling
+# No additional dependencies needed for performance optimizations
