@@ -832,22 +832,22 @@ class MainWindow(QtWidgets.QMainWindow):
     def _setup_shortcuts(self) -> None:
         """Setup keyboard shortcuts."""
         # Quick search with '/' key (Gmail-style)
-        slash_shortcut = QtWidgets.QShortcut(QtGui.QKeySequence("/"), self)
+        slash_shortcut = QtGui.QShortcut(QtGui.QKeySequence("/"), self)
         slash_shortcut.activated.connect(self._focus_search)
 
         # j/k navigation (Gmail/Vim-style)
-        j_shortcut = QtWidgets.QShortcut(QtGui.QKeySequence("j"), self)
+        j_shortcut = QtGui.QShortcut(QtGui.QKeySequence("j"), self)
         j_shortcut.activated.connect(self._select_next_row)
 
-        k_shortcut = QtWidgets.QShortcut(QtGui.QKeySequence("k"), self)
+        k_shortcut = QtGui.QShortcut(QtGui.QKeySequence("k"), self)
         k_shortcut.activated.connect(self._select_previous_row)
 
         # Enter to open/activate
-        enter_shortcut = QtWidgets.QShortcut(QtGui.QKeySequence(QtCore.Qt.Key.Key_Return), self)
+        enter_shortcut = QtGui.QShortcut(QtGui.QKeySequence(QtCore.Qt.Key.Key_Return), self)
         enter_shortcut.activated.connect(self._activate_selected_row)
 
         # Escape to cancel/close
-        esc_shortcut = QtWidgets.QShortcut(QtGui.QKeySequence(QtCore.Qt.Key.Key_Escape), self)
+        esc_shortcut = QtGui.QShortcut(QtGui.QKeySequence(QtCore.Qt.Key.Key_Escape), self)
         esc_shortcut.activated.connect(self._handle_escape)
 
     def _update_status_bar(self) -> None:
