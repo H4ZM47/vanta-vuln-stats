@@ -5,19 +5,37 @@ This guide explains how to package the Vanta Vulnerability Statistics utility as
 ## Prerequisites
 
 - **macOS** system (for final build)
-- **Python 3.8+** installed (Python 3.12 or 3.13 recommended for the GUI build)
+- **Python 3.8-3.13** installed (Python 3.12 or 3.13 recommended)
 - **Xcode Command Line Tools** (install via: `xcode-select --install`)
+
+> **Note:** Python 3.14+ is not yet supported due to PySide6 compatibility.
 
 ## Quick Start
 
-The easiest way to build the app is using the provided build script:
+### Option 1: Automated Installation (Recommended)
+
+First, run the installation script to set up your environment:
+
+```bash
+./install_macos.sh
+```
+
+This ensures all dependencies are properly installed. Then build the app:
+
+```bash
+./build_macos_app.sh
+```
+
+### Option 2: Direct Build
+
+If you already have dependencies installed, use the build script directly:
 
 ```bash
 ./build_macos_app.sh
 ```
 
 This will:
-1. Create a Python virtual environment
+1. Create a Python virtual environment (if needed)
 2. Install all dependencies including py2app
 3. Build the macOS app bundle
 4. Output the app to `dist/vanta_vuln_gui.app`
