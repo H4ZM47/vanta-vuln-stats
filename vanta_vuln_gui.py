@@ -21,6 +21,7 @@ from PySide6 import QtCore, QtGui, QtWidgets
 from core.stats import VulnerabilityStats
 from gui.credentials_dialog import CredentialsDialog
 from gui.credentials_manager import CredentialsManager
+from gui.detail_widget import VulnerabilityDetailWidget
 from gui.models import VulnerabilitySortFilterProxyModel, VulnerabilityTableModel
 from gui.settings_manager import SettingsManager
 from gui.workers import APISyncWorker, DatabaseWorker, ThreadManager
@@ -153,7 +154,19 @@ class MainWindow(QtWidgets.QMainWindow):
         main_layout.addWidget(self._build_path_controls())
         main_layout.addWidget(self._build_filter_group())
         main_layout.addWidget(self._build_stats_group())
-        main_layout.addWidget(self._build_table())
+
+        table_view = self._build_table()
+        self.detail_panel = VulnerabilityDetailWidget()
+        self.detail_panel.setMinimumWidth(360)
+
+        self.content_splitter = QtWidgets.QSplitter(QtCore.Qt.Orientation.Horizontal)
+        self.content_splitter.setChildrenCollapsible(False)
+        self.content_splitter.addWidget(table_view)
+        self.content_splitter.addWidget(self.detail_panel)
+        self.content_splitter.setStretchFactor(0, 3)
+        self.content_splitter.setStretchFactor(1, 2)
+        main_layout.addWidget(self.content_splitter)
+
         main_layout.addWidget(self._build_log_view())
 
     def _build_path_controls(self) -> QtWidgets.QGroupBox:
@@ -508,8 +521,28 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _populate_table(self) -> None:
         """Populate the table with filtered vulnerability data using the model."""
+        selected_id = self._get_selected_vulnerability_id()
+
         # Update the model with filtered data
         self.vuln_model.setData(self.filtered_vulnerabilities)
+
+        if not self.filtered_vulnerabilities:
+            if self.table.selectionModel():
+                self.table.clearSelection()
+            if hasattr(self, "detail_panel"):
+                self.detail_panel.show_vulnerability(None)
+            self._update_status_bar()
+            return
+
+        target_row = self._find_proxy_row_by_id(selected_id) if selected_id else 0
+        if target_row is None:
+            target_row = 0
+
+        target_row = max(0, min(target_row, self.proxy_model.rowCount() - 1))
+        self.table.selectRow(target_row)
+        target_index = self.proxy_model.index(target_row, 0)
+        self.table.setCurrentIndex(target_index)
+        self.table.scrollTo(target_index, QtWidgets.QAbstractItemView.ScrollHint.PositionAtCenter)
 
         # Update the status bar
         self._update_status_bar()
@@ -1121,7 +1154,53 @@ Save commonly-used filter combinations with File → Save Filter.</p>
 
     def _on_selection_changed(self) -> None:
         """Handle table selection changes."""
+        selection_model = self.table.selectionModel()
+        if not hasattr(self, "detail_panel"):
+            self._update_status_bar()
+            return
+
+        if selection_model is None:
+            self.detail_panel.show_vulnerability(None)
+            self._update_status_bar()
+            return
+
+        selected_rows = selection_model.selectedRows()
+        if not selected_rows:
+            self.detail_panel.show_vulnerability(None)
+        elif len(selected_rows) == 1:
+            source_index = self.proxy_model.mapToSource(selected_rows[0])
+            vuln = self.vuln_model.getVulnerability(source_index.row())
+            self.detail_panel.show_vulnerability(vuln)
+        else:
+            self.detail_panel.show_selection_message(len(selected_rows))
+
         self._update_status_bar()
+
+    def _get_selected_vulnerability_id(self) -> Optional[str]:
+        """Return the ID of the first selected vulnerability, if any."""
+        selection_model = self.table.selectionModel()
+        if not selection_model:
+            return None
+        selected_rows = selection_model.selectedRows()
+        if not selected_rows:
+            return None
+        source_index = self.proxy_model.mapToSource(selected_rows[0])
+        vuln = self.vuln_model.getVulnerability(source_index.row())
+        if not vuln:
+            return None
+        return vuln.get("id")
+
+    def _find_proxy_row_by_id(self, vulnerability_id: Optional[str]) -> Optional[int]:
+        """Find the proxy model row for the given vulnerability ID."""
+        if not vulnerability_id:
+            return None
+        for row in range(self.proxy_model.rowCount()):
+            proxy_index = self.proxy_model.index(row, 0)
+            source_index = self.proxy_model.mapToSource(proxy_index)
+            vuln = self.vuln_model.getVulnerability(source_index.row())
+            if vuln and vuln.get("id") == vulnerability_id:
+                return row
+        return None
 
     def closeEvent(self, event: QtGui.QCloseEvent) -> None:
         """Handle window close event to save settings."""
