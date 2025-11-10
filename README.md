@@ -66,6 +66,9 @@ vanta-vuln-stats/
 ### Core Installation (CLI Only)
 
 1. Install core dependencies:
+### Standard Installation (CLI & GUI)
+
+1. Install dependencies:
 ```bash
 pip install -r requirements.txt
 # or using uv:
@@ -96,6 +99,25 @@ This includes:
 - openpyxl (Excel export)
 - reportlab (PDF reports)
 - pytest-qt (GUI testing)
+### macOS App Bundle
+
+For macOS users, you can build a standalone app bundle that doesn't require Python installation:
+
+```bash
+./build_macos_app.sh
+```
+
+This creates a native macOS application at `dist/vanta_vuln_gui.app` that you can:
+- Double-click to run
+- Copy to your Applications folder
+- Distribute to other macOS users (via DMG)
+
+**For detailed instructions**, see [MACOS_APP_BUILD.md](MACOS_APP_BUILD.md) which covers:
+- Building the app bundle
+- Creating a custom icon
+- Creating DMG installers
+- Code signing and notarization
+- Troubleshooting
 
 ## Usage
 
