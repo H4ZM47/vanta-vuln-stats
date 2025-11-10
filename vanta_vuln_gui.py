@@ -22,7 +22,10 @@ from core.stats import VulnerabilityStats
 from gui.credentials_dialog import CredentialsDialog
 from gui.credentials_manager import CredentialsManager
 from gui.detail_widget import VulnerabilityDetailWidget
+from gui.dashboard import DashboardWidget
+from gui.detail_panel import VulnerabilityDetailPanel
 from gui.models import VulnerabilitySortFilterProxyModel, VulnerabilityTableModel
+from gui.network_monitor import NetworkMonitor
 from gui.settings_manager import SettingsManager
 from gui.workers import APISyncWorker, DatabaseWorker, ThreadManager
 
@@ -117,11 +120,24 @@ class MainWindow(QtWidgets.QMainWindow):
         self.last_sync_time: Optional[datetime] = None
         self.active_filter_count: int = 0
         self._current_filter_name: Optional[str] = None
+        self._is_online: Optional[bool] = None
+        self._is_syncing: bool = False
 
         # Data models (Phase 2: Model-View architecture)
         self.vuln_model = VulnerabilityTableModel()
         self.proxy_model = VulnerabilitySortFilterProxyModel()
         self.proxy_model.setSourceModel(self.vuln_model)
+
+        # Detail and dashboard widgets
+        self.detail_panel = VulnerabilityDetailPanel()
+        self.detail_panel.setMinimumWidth(320)
+        self.dashboard_widget = DashboardWidget()
+
+        # Live filter debounce timer
+        self._filter_timer = QtCore.QTimer(self)
+        self._filter_timer.setInterval(300)
+        self._filter_timer.setSingleShot(True)
+        self._filter_timer.timeout.connect(self.apply_filters)
 
         # Initialize settings manager
         self.settings_manager = SettingsManager()
@@ -145,6 +161,19 @@ class MainWindow(QtWidgets.QMainWindow):
         saved_db_path = self.settings_manager.get_database_path()
         if saved_db_path:
             self.database_path_edit.setText(saved_db_path)
+
+        # Monitor network connectivity for offline mode support
+        self.network_monitor = NetworkMonitor(parent=self)
+        self.network_monitor.statusChanged.connect(self._on_network_status_changed)
+        self.network_monitor.checkStarted.connect(self._on_network_check_started)
+        self.network_monitor.checkFinished.connect(self._on_network_check_finished)
+        self.network_monitor.start()
+
+        if self.network_monitor.is_online() is not None and self._is_online is None:
+            # Ensure UI reflects initial status if signal has not fired yet.
+            self._on_network_status_changed(self.network_monitor.is_online())
+
+        self._update_sync_controls()
 
     def _build_ui(self) -> None:
         central_widget = QtWidgets.QWidget()
@@ -211,6 +240,8 @@ class MainWindow(QtWidgets.QMainWindow):
     def _build_filter_group(self) -> QtWidgets.QGroupBox:
         group = QtWidgets.QGroupBox("Filters")
         layout = QtWidgets.QGridLayout(group)
+        layout.setHorizontalSpacing(8)
+        layout.setVerticalSpacing(6)
 
         self.date_identified_start_edit = QtWidgets.QLineEdit()
         self.date_identified_start_edit.setPlaceholderText("YYYY-MM-DDTHH:MM:SSZ")
@@ -249,11 +280,55 @@ class MainWindow(QtWidgets.QMainWindow):
         layout.addWidget(QtWidgets.QLabel("Asset ID"), 6, 0)
         layout.addWidget(self.asset_edit, 6, 1, 1, 2)
 
+        button_layout = QtWidgets.QHBoxLayout()
+        self.clear_filters_button = QtWidgets.QPushButton("Clear Filters")
+        self.load_filter_button = QtWidgets.QPushButton("Load Preset…")
+        self.save_filter_button = QtWidgets.QPushButton("Save Preset")
+        button_layout.addWidget(self.clear_filters_button)
+        button_layout.addWidget(self.load_filter_button)
+        button_layout.addWidget(self.save_filter_button)
+        button_layout.addStretch()
+
+        layout.addLayout(button_layout, 7, 0, 1, 7)
+
+        self.clear_filters_button.clicked.connect(self._new_filter)
+        self.load_filter_button.clicked.connect(self._open_filter)
+        self.save_filter_button.clicked.connect(self._save_filter)
+
+        self._connect_filter_inputs()
+
         return group
 
+    def _connect_filter_inputs(self) -> None:
+        """Connect filter input widgets to live filtering."""
+        inputs = [
+            self.date_identified_start_edit,
+            self.date_identified_end_edit,
+            self.date_remediated_start_edit,
+            self.date_remediated_end_edit,
+            self.cve_edit,
+            self.asset_edit,
+        ]
+        for widget in inputs:
+            widget.textChanged.connect(self._on_filter_input_changed)
+
+        for checkbox in self.severity_checkboxes.values():
+            checkbox.stateChanged.connect(self._on_filter_input_changed)
+
+    def _on_filter_input_changed(self) -> None:
+        """Trigger a debounced filter application when inputs change."""
+        if not self.all_vulnerabilities:
+            return
+        self._filter_timer.start()
+
     def _build_stats_group(self) -> QtWidgets.QGroupBox:
-        group = QtWidgets.QGroupBox("Statistics")
-        layout = QtWidgets.QGridLayout(group)
+        group = QtWidgets.QGroupBox("Statistics & Dashboard")
+        layout = QtWidgets.QVBoxLayout(group)
+        layout.setSpacing(12)
+
+        metrics_grid = QtWidgets.QGridLayout()
+        metrics_grid.setHorizontalSpacing(12)
+        metrics_grid.setVerticalSpacing(6)
 
         self.stats_labels: Dict[str, QtWidgets.QLabel] = {}
         stat_fields = [
@@ -269,17 +344,20 @@ class MainWindow(QtWidgets.QMainWindow):
         for row, (key, label) in enumerate(stat_fields):
             widget = QtWidgets.QLabel("0")
             widget.setObjectName(key)
-            layout.addWidget(QtWidgets.QLabel(label), row, 0)
-            layout.addWidget(widget, row, 1)
+            metrics_grid.addWidget(QtWidgets.QLabel(label), row, 0)
+            metrics_grid.addWidget(widget, row, 1)
             self.stats_labels[key] = widget
 
         self.severity_stats: Dict[str, QtWidgets.QLabel] = {}
         severity_names = ["CRITICAL", "HIGH", "MEDIUM", "LOW"]
         for idx, severity in enumerate(severity_names):
             label = QtWidgets.QLabel("0")
-            layout.addWidget(QtWidgets.QLabel(severity.title()), idx, 2)
-            layout.addWidget(label, idx, 3)
+            metrics_grid.addWidget(QtWidgets.QLabel(severity.title()), idx, 2)
+            metrics_grid.addWidget(label, idx, 3)
             self.severity_stats[severity] = label
+
+        layout.addLayout(metrics_grid)
+        layout.addWidget(self.dashboard_widget)
 
         return group
 
@@ -354,6 +432,16 @@ class MainWindow(QtWidgets.QMainWindow):
             self.append_log("A task is already running. Please wait...")
             return
 
+        if mode == "sync" and self._is_online is False:
+            QtWidgets.QMessageBox.warning(
+                self,
+                "Offline Mode",
+                "No internet connection detected. Connect to the internet to sync data, "
+                "or load cached data instead.",
+            )
+            self.append_log("Sync cancelled: offline mode is active.")
+            return
+
         if not self._validate_inputs(mode):
             return
 
@@ -363,6 +451,8 @@ class MainWindow(QtWidgets.QMainWindow):
         # Disable buttons while working
         self.load_button.setEnabled(False)
         self.sync_button.setEnabled(False)
+        if hasattr(self, "refresh_action"):
+            self.refresh_action.setEnabled(False)
 
         # Create appropriate worker based on mode
         if mode == "cache":
@@ -371,6 +461,8 @@ class MainWindow(QtWidgets.QMainWindow):
         else:  # sync
             worker = APISyncWorker(database_path, credentials_path)
             self.append_log("Starting API sync operation...")
+            self._is_syncing = True
+            self._update_status_bar()
 
         # Start the worker using ThreadManager
         self.thread_manager.start_worker(
@@ -380,10 +472,12 @@ class MainWindow(QtWidgets.QMainWindow):
             on_progress=self.append_log,
         )
 
+        self._update_sync_controls()
+
     def _cleanup_buttons(self) -> None:
         """Re-enable buttons after worker completes."""
         self.load_button.setEnabled(True)
-        self.sync_button.setEnabled(True)
+        self._update_sync_controls()
 
     def _cleanup_worker_thread(self) -> None:
         """Legacy cleanup method for backwards compatibility."""
@@ -398,6 +492,10 @@ class MainWindow(QtWidgets.QMainWindow):
         """Handle worker error."""
         QtWidgets.QMessageBox.critical(self, "Error", message)
         self.append_log(f"Error: {message}")
+        if self._is_syncing:
+            self._is_syncing = False
+        self._update_sync_controls()
+        self._update_status_bar()
         self._cleanup_buttons()
 
     def _handle_worker_finished(self, vulnerabilities: List[Dict], summary: Dict) -> None:
@@ -407,6 +505,7 @@ class MainWindow(QtWidgets.QMainWindow):
         # Update sync time if this was a sync operation
         if summary.get("source") == "sync":
             self.last_sync_time = datetime.now()
+            self._is_syncing = False
 
         # Apply filters and update display
         self.apply_filters()
@@ -424,6 +523,8 @@ class MainWindow(QtWidgets.QMainWindow):
             self.append_log(f"Loaded {summary.get('count', 0)} vulnerabilities from cache.")
 
         # Re-enable buttons
+        self._update_sync_controls()
+        self._update_status_bar()
         self._cleanup_buttons()
 
     def _validate_inputs(self, mode: str) -> bool:
@@ -461,7 +562,10 @@ class MainWindow(QtWidgets.QMainWindow):
         return True
 
     def apply_filters(self) -> None:
+        self._filter_timer.stop()
         if not self.all_vulnerabilities:
+            self.dashboard_widget.clear()
+            self.detail_panel.display_vulnerability(None)
             self.append_log("No data loaded yet.")
             return
 
@@ -519,6 +623,8 @@ class MainWindow(QtWidgets.QMainWindow):
         for severity, label in self.severity_stats.items():
             label.setText(str(stats.get("by_severity", {}).get(severity, 0)))
 
+        self.dashboard_widget.update_data(stats, self.filtered_vulnerabilities)
+
     def _populate_table(self) -> None:
         """Populate the table with filtered vulnerability data using the model."""
         selected_id = self._get_selected_vulnerability_id()
@@ -546,6 +652,12 @@ class MainWindow(QtWidgets.QMainWindow):
 
         # Update the status bar
         self._update_status_bar()
+
+        if self.filtered_vulnerabilities:
+            self.table.selectRow(0)
+        else:
+            self.table.clearSelection()
+            self.detail_panel.display_vulnerability(None)
 
     def _export_filtered(self) -> None:
         if not self.filtered_vulnerabilities:
@@ -633,9 +745,9 @@ class MainWindow(QtWidgets.QMainWindow):
         # View Menu (6 items)
         view_menu = menu_bar.addMenu("&View")
 
-        refresh_action = view_menu.addAction("&Refresh Data")
-        refresh_action.setShortcut(QtGui.QKeySequence.StandardKey.Refresh)
-        refresh_action.triggered.connect(lambda: self._start_worker("sync"))
+        self.refresh_action = view_menu.addAction("&Refresh Data")
+        self.refresh_action.setShortcut(QtGui.QKeySequence.StandardKey.Refresh)
+        self.refresh_action.triggered.connect(lambda: self._start_worker("sync"))
 
         view_menu.addSeparator()
 
@@ -691,6 +803,32 @@ class MainWindow(QtWidgets.QMainWindow):
         self.context_info_label = QtWidgets.QLabel("Showing 0 of 0 vulnerabilities")
         self.status_bar.addPermanentWidget(self.context_info_label)
 
+    def _can_sync_actions(self) -> bool:
+        """Determine if sync-related controls should be enabled."""
+
+        return (
+            self._is_online is not False
+            and not self.thread_manager.has_active_threads()
+            and not self._is_syncing
+        )
+
+    def _update_sync_controls(self) -> None:
+        """Enable/disable sync controls based on connectivity and activity."""
+
+        can_sync = self._can_sync_actions()
+
+        tooltip = "Sync data from Vanta API"
+        if self._is_online is False:
+            tooltip = "Offline mode: Connect to the internet to sync."
+        elif self._is_syncing:
+            tooltip = "Sync in progress..."
+
+        self.sync_button.setEnabled(can_sync)
+        self.sync_button.setToolTip(tooltip)
+
+        if hasattr(self, "refresh_action"):
+            self.refresh_action.setEnabled(can_sync)
+
     def _setup_shortcuts(self) -> None:
         """Setup keyboard shortcuts."""
         # Quick search with '/' key (Gmail-style)
@@ -715,7 +853,23 @@ class MainWindow(QtWidgets.QMainWindow):
     def _update_status_bar(self) -> None:
         """Update status bar with current state."""
         # Update sync status
-        if self.last_sync_time:
+        if self._is_syncing:
+            self.sync_status_label.setText("🟡 Syncing...")
+            self.sync_status_label.setToolTip("Synchronizing data with the Vanta API")
+        elif self._is_online is False:
+            if self.all_vulnerabilities:
+                self.sync_status_label.setText("🔴 Offline – using cached data")
+            else:
+                self.sync_status_label.setText("🔴 Offline – no data available")
+
+            tooltip = "No internet connection detected. You can continue working with cached data."
+            if self.last_sync_time:
+                tooltip += (
+                    "\nLast successful sync: "
+                    + self.last_sync_time.strftime("%Y-%m-%d %H:%M:%S")
+                )
+            self.sync_status_label.setToolTip(tooltip)
+        elif self.last_sync_time:
             elapsed = datetime.now() - self.last_sync_time
             if elapsed.seconds < 60:
                 time_str = "just now"
@@ -732,11 +886,20 @@ class MainWindow(QtWidgets.QMainWindow):
                 f"Database: {self.database_path_edit.text()}"
             )
         elif self.all_vulnerabilities:
-            self.sync_status_label.setText("🟢 Data loaded from cache")
+            status_text = "🟢 Data loaded from cache"
+            if self._is_online is False:
+                status_text = "🔴 Offline – using cached data"
+            self.sync_status_label.setText(status_text)
             self.sync_status_label.setToolTip("Data loaded from cache")
         else:
-            self.sync_status_label.setText("🔴 No data loaded")
-            self.sync_status_label.setToolTip("Click 'Sync From API' or 'Load From Cache' to load data")
+            if self._is_online is False:
+                self.sync_status_label.setText("🔴 Offline – connect to sync")
+                self.sync_status_label.setToolTip(
+                    "No data available. Connect to the internet and run a sync to fetch vulnerabilities."
+                )
+            else:
+                self.sync_status_label.setText("🟢 Ready to sync")
+                self.sync_status_label.setToolTip("Click 'Sync From API' or 'Load From Cache' to load data")
 
         # Update context info
         total_count = len(self.all_vulnerabilities)
@@ -756,6 +919,36 @@ class MainWindow(QtWidgets.QMainWindow):
         else:
             self.context_info_label.setText(f"Showing {filtered_count} of {total_count} vulnerabilities")
 
+    def _on_network_check_started(self) -> None:
+        """Provide visual feedback while the initial connectivity check runs."""
+
+        if self._is_online is None:
+            self.sync_status_label.setText("🟡 Checking connection…")
+            self.sync_status_label.setToolTip("Checking for internet connectivity…")
+
+    def _on_network_check_finished(self, _: bool) -> None:
+        """Ensure the status bar reflects the latest connectivity state."""
+
+        if not self._is_syncing:
+            self._update_status_bar()
+
+    def _on_network_status_changed(self, online: bool) -> None:
+        """React to network connectivity changes."""
+
+        previous_status = self._is_online
+        self._is_online = online
+
+        if previous_status is None:
+            status_msg = "Online" if online else "Offline"
+            self.append_log(f"Network status detected: {status_msg}.")
+        elif online != previous_status:
+            status_msg = "online" if online else "offline"
+            self.append_log(f"Network connection is now {status_msg}.")
+
+        self._update_sync_controls()
+        if not self._is_syncing:
+            self._update_status_bar()
+
     # Menu action handlers - File Menu
     def _new_filter(self) -> None:
         """Clear all filters."""
@@ -767,6 +960,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.asset_edit.clear()
         for checkbox in self.severity_checkboxes.values():
             checkbox.setChecked(False)
+        self._current_filter_name = None
         self.apply_filters()
         self.append_log("Filters cleared")
 
@@ -786,6 +980,7 @@ class MainWindow(QtWidgets.QMainWindow):
             filters = self.settings_manager.get_filter_preset(preset_name)
             if filters:
                 self._apply_filter_preset(filters)
+                self._current_filter_name = preset_name
                 self.append_log(f"Loaded filter preset: {preset_name}")
 
     def _save_filter(self) -> None:
@@ -1221,6 +1416,9 @@ Save commonly-used filter combinations with File → Save Filter.</p>
         if self.worker_thread is not None:
             self.worker_thread.quit()
             self.worker_thread.wait()
+
+        if hasattr(self, "network_monitor"):
+            self.network_monitor.stop()
 
         event.accept()
 

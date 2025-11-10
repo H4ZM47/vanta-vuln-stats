@@ -9,7 +9,10 @@ from gui.credentials_dialog import CredentialsDialog
 from gui.credentials_manager import CredentialsManager
 from gui.database_manager import DatabaseCache, DatabaseConnectionPool, DatabaseManager
 from gui.detail_widget import VulnerabilityDetailWidget
+from gui.dashboard import DashboardWidget
+from gui.detail_panel import VulnerabilityDetailPanel
 from gui.models import VulnerabilitySortFilterProxyModel, VulnerabilityTableModel
+from gui.network_monitor import NetworkMonitor
 from gui.settings_manager import SettingsManager
 from gui.workers import (
     APISyncWorker,
@@ -32,4 +35,7 @@ __all__ = [
     "DatabaseManager",
     "DatabaseConnectionPool",
     "DatabaseCache",
+    "NetworkMonitor",
+    "DashboardWidget",
+    "VulnerabilityDetailPanel",
 ]
