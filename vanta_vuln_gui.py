@@ -5,6 +5,9 @@ Qt graphical interface for the Vanta Vulnerability Statistics utility.
 This GUI wraps the existing API/database/statistics logic provided by
 `vanta_vuln_stats.py` and makes it easier to sync data, explore cached
 results, and apply filters without using the command line.
+
+Phase 2: Enhanced with Model-View architecture, improved threading,
+and optimized performance for large datasets.
 """
 
 import json
@@ -15,19 +18,17 @@ from typing import Dict, List, Optional
 
 from PySide6 import QtCore, QtGui, QtWidgets
 
+from core.stats import VulnerabilityStats
 from gui.credentials_dialog import CredentialsDialog
 from gui.credentials_manager import CredentialsManager
+from gui.models import VulnerabilitySortFilterProxyModel, VulnerabilityTableModel
 from gui.settings_manager import SettingsManager
-from vanta_vuln_stats import (
-    VantaAPIClient,
-    VulnerabilityDatabase,
-    VulnerabilityStats,
-    load_credentials,
-)
+from gui.workers import APISyncWorker, DatabaseWorker, ThreadManager
 
 
+# Legacy DataWorker for backwards compatibility
 class DataWorker(QtCore.QObject):
-    """Background worker that loads data from the cache or syncs from the API."""
+    """Background worker that loads data from the cache or syncs from the API (Legacy)."""
 
     finished = QtCore.Signal(list, dict)
     progress = QtCore.Signal(str)
@@ -104,13 +105,22 @@ class MainWindow(QtWidgets.QMainWindow):
         self.setWindowTitle("Vanta Vulnerability Stats")
         self.resize(1200, 800)
 
+        # Thread management
+        self.thread_manager = ThreadManager()
         self.worker_thread: Optional[QtCore.QThread] = None
         self.worker: Optional[DataWorker] = None
+
+        # Data storage
         self.all_vulnerabilities: List[Dict] = []
         self.filtered_vulnerabilities: List[Dict] = []
         self.last_sync_time: Optional[datetime] = None
         self.active_filter_count: int = 0
         self._current_filter_name: Optional[str] = None
+
+        # Data models (Phase 2: Model-View architecture)
+        self.vuln_model = VulnerabilityTableModel()
+        self.proxy_model = VulnerabilitySortFilterProxyModel()
+        self.proxy_model.setSourceModel(self.vuln_model)
 
         # Initialize settings manager
         self.settings_manager = SettingsManager()
@@ -260,24 +270,44 @@ class MainWindow(QtWidgets.QMainWindow):
 
         return group
 
-    def _build_table(self) -> QtWidgets.QTableWidget:
-        self.table = QtWidgets.QTableWidget()
-        headers = [
-            "ID",
-            "Name",
-            "Severity",
-            "Asset",
-            "Fixable",
-            "Status",
-            "First Detected",
-            "Last Detected",
-            "Source",
-        ]
-        self.table.setColumnCount(len(headers))
-        self.table.setHorizontalHeaderLabels(headers)
-        self.table.horizontalHeader().setStretchLastSection(True)
+    def _build_table(self) -> QtWidgets.QTableView:
+        """Build the vulnerability table view with Model-View architecture."""
+        self.table = QtWidgets.QTableView()
+
+        # Set the model
+        self.table.setModel(self.proxy_model)
+
+        # Enable sorting
+        self.table.setSortingEnabled(True)
+
+        # Configure view behavior
         self.table.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectionBehavior.SelectRows)
+        self.table.setSelectionMode(QtWidgets.QAbstractItemView.SelectionMode.ExtendedSelection)
         self.table.setEditTriggers(QtWidgets.QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.table.setAlternatingRowColors(True)
+
+        # Configure header
+        header = self.table.horizontalHeader()
+        header.setStretchLastSection(True)
+        header.setSectionResizeMode(QtWidgets.QHeaderView.ResizeMode.Interactive)
+
+        # Set reasonable column widths
+        header.resizeSection(0, 150)  # ID
+        header.resizeSection(1, 250)  # Name
+        header.resizeSection(2, 100)  # Severity
+        header.resizeSection(3, 150)  # Asset
+        header.resizeSection(4, 80)   # Fixable
+        header.resizeSection(5, 100)  # Status
+        header.resizeSection(6, 140)  # First Detected
+        header.resizeSection(7, 140)  # Last Detected
+
+        # Enable context menu
+        self.table.setContextMenuPolicy(QtCore.Qt.ContextMenuPolicy.CustomContextMenu)
+        self.table.customContextMenuRequested.connect(self._show_table_context_menu)
+
+        # Connect selection changed signal
+        self.table.selectionModel().selectionChanged.connect(self._on_selection_changed)
+
         return self.table
 
     def _build_log_view(self) -> QtWidgets.QGroupBox:
@@ -306,7 +336,9 @@ class MainWindow(QtWidgets.QMainWindow):
             self.credentials_path_edit.setText(path)
 
     def _start_worker(self, mode: str) -> None:
-        if self.worker_thread is not None:
+        """Start a background worker for loading or syncing data (Phase 2 enhanced)."""
+        if self.thread_manager.has_active_threads():
+            self.append_log("A task is already running. Please wait...")
             return
 
         if not self._validate_inputs(mode):
@@ -315,46 +347,58 @@ class MainWindow(QtWidgets.QMainWindow):
         database_path = self.database_path_edit.text().strip()
         credentials_path = self.credentials_path_edit.text().strip()
 
-        self.worker = DataWorker(mode, database_path, credentials_path)
-        self.worker_thread = QtCore.QThread()
-        self.worker.moveToThread(self.worker_thread)
-
-        self.worker_thread.started.connect(self.worker.run)
-        self.worker.progress.connect(self.append_log)
-        self.worker.error.connect(self._handle_worker_error)
-        self.worker.finished.connect(self._handle_worker_finished)
-        self.worker.finished.connect(self.worker_thread.quit)
-        self.worker.error.connect(self.worker_thread.quit)
-        self.worker.finished.connect(self.worker.deleteLater)
-        self.worker.error.connect(self.worker.deleteLater)
-        self.worker_thread.finished.connect(self._cleanup_worker_thread)
-        self.worker_thread.start()
-
+        # Disable buttons while working
         self.load_button.setEnabled(False)
         self.sync_button.setEnabled(False)
-        self.append_log("Started background task…")
 
-    def _cleanup_worker_thread(self) -> None:
-        self.worker_thread.deleteLater()
-        self.worker_thread = None
-        self.worker = None
+        # Create appropriate worker based on mode
+        if mode == "cache":
+            worker = DatabaseWorker(database_path)
+            self.append_log(f"Loading cached data from {database_path}...")
+        else:  # sync
+            worker = APISyncWorker(database_path, credentials_path)
+            self.append_log("Starting API sync operation...")
+
+        # Start the worker using ThreadManager
+        self.thread_manager.start_worker(
+            worker,
+            on_finished=self._handle_worker_finished,
+            on_error=self._handle_worker_error,
+            on_progress=self.append_log,
+        )
+
+    def _cleanup_buttons(self) -> None:
+        """Re-enable buttons after worker completes."""
         self.load_button.setEnabled(True)
         self.sync_button.setEnabled(True)
+
+    def _cleanup_worker_thread(self) -> None:
+        """Legacy cleanup method for backwards compatibility."""
+        if self.worker_thread:
+            self.worker_thread.deleteLater()
+            self.worker_thread = None
+        self.worker = None
+        self._cleanup_buttons()
         self.append_log("Background task finished.")
 
     def _handle_worker_error(self, message: str) -> None:
+        """Handle worker error."""
         QtWidgets.QMessageBox.critical(self, "Error", message)
         self.append_log(f"Error: {message}")
+        self._cleanup_buttons()
 
     def _handle_worker_finished(self, vulnerabilities: List[Dict], summary: Dict) -> None:
+        """Handle worker completion and update UI with results."""
         self.all_vulnerabilities = vulnerabilities
 
         # Update sync time if this was a sync operation
         if summary.get("source") == "sync":
             self.last_sync_time = datetime.now()
 
+        # Apply filters and update display
         self.apply_filters()
 
+        # Log completion message
         if summary.get("source") == "sync" and summary.get("sync_stats"):
             stats = summary["sync_stats"]
             sync_msg = (
@@ -365,6 +409,9 @@ class MainWindow(QtWidgets.QMainWindow):
             self.append_log(sync_msg)
         else:
             self.append_log(f"Loaded {summary.get('count', 0)} vulnerabilities from cache.")
+
+        # Re-enable buttons
+        self._cleanup_buttons()
 
     def _validate_inputs(self, mode: str) -> bool:
         database_path = self.database_path_edit.text().strip()
@@ -460,29 +507,12 @@ class MainWindow(QtWidgets.QMainWindow):
             label.setText(str(stats.get("by_severity", {}).get(severity, 0)))
 
     def _populate_table(self) -> None:
-        self.table.setRowCount(len(self.filtered_vulnerabilities))
-        for row, vuln in enumerate(self.filtered_vulnerabilities):
-            values = [
-                vuln.get("id", ""),
-                vuln.get("name", ""),
-                vuln.get("severity", ""),
-                vuln.get("targetId", ""),
-                "Yes" if vuln.get("isFixable") else "No",
-                "Remediated" if vuln.get("deactivateMetadata") else "Active",
-                vuln.get("firstDetectedDate", "") or "",
-                vuln.get("lastDetectedDate", "") or "",
-                vuln.get("scanSource", "") or "",
-            ]
-            for col, value in enumerate(values):
-                item = QtWidgets.QTableWidgetItem(value if value is not None else "")
-                if col == 2:
-                    # Bold severity for quick scanning
-                    font = item.font()
-                    font.setBold(True)
-                    item.setFont(font)
-                self.table.setItem(row, col, item)
+        """Populate the table with filtered vulnerability data using the model."""
+        # Update the model with filtered data
+        self.vuln_model.setData(self.filtered_vulnerabilities)
 
-        self.table.resizeColumnsToContents()
+        # Update the status bar
+        self._update_status_bar()
 
     def _export_filtered(self) -> None:
         if not self.filtered_vulnerabilities:
@@ -678,7 +708,11 @@ class MainWindow(QtWidgets.QMainWindow):
         # Update context info
         total_count = len(self.all_vulnerabilities)
         filtered_count = len(self.filtered_vulnerabilities)
-        selected_count = len(self.table.selectionModel().selectedRows())
+
+        # Get selected count (handle case where selection model might not be initialized)
+        selected_count = 0
+        if self.table.selectionModel():
+            selected_count = len(self.table.selectionModel().selectedRows())
 
         if selected_count > 0:
             self.context_info_label.setText(f"{selected_count} items selected")
@@ -931,30 +965,33 @@ Save commonly-used filter combinations with File → Save Filter.</p>
     # Keyboard shortcut handlers
     def _select_next_row(self) -> None:
         """Select next row (j key)."""
-        current_row = self.table.currentRow()
-        if current_row < self.table.rowCount() - 1:
-            self.table.selectRow(current_row + 1)
-            self.table.setCurrentCell(current_row + 1, 0)
+        current_index = self.table.currentIndex()
+        if current_index.isValid():
+            next_row = current_index.row() + 1
+            if next_row < self.proxy_model.rowCount():
+                next_index = self.proxy_model.index(next_row, 0)
+                self.table.setCurrentIndex(next_index)
+                self.table.selectRow(next_row)
 
     def _select_previous_row(self) -> None:
         """Select previous row (k key)."""
-        current_row = self.table.currentRow()
-        if current_row > 0:
-            self.table.selectRow(current_row - 1)
-            self.table.setCurrentCell(current_row - 1, 0)
+        current_index = self.table.currentIndex()
+        if current_index.isValid():
+            prev_row = current_index.row() - 1
+            if prev_row >= 0:
+                prev_index = self.proxy_model.index(prev_row, 0)
+                self.table.setCurrentIndex(prev_index)
+                self.table.selectRow(prev_row)
 
     def _activate_selected_row(self) -> None:
         """Activate selected row (Enter key)."""
-        current_row = self.table.currentRow()
-        if current_row >= 0 and current_row < len(self.filtered_vulnerabilities):
-            vuln = self.filtered_vulnerabilities[current_row]
-            # Show vulnerability details
-            details = json.dumps(vuln, indent=2)
-            msg_box = QtWidgets.QMessageBox(self)
-            msg_box.setWindowTitle("Vulnerability Details")
-            msg_box.setText(f"<h3>{vuln.get('name', 'Unknown')}</h3>")
-            msg_box.setDetailedText(details)
-            msg_box.exec()
+        current_index = self.table.currentIndex()
+        if current_index.isValid():
+            # Map proxy index to source model
+            source_index = self.proxy_model.mapToSource(current_index)
+            vuln = self.vuln_model.getVulnerability(source_index.row())
+            if vuln:
+                self._show_vuln_details(vuln)
 
     def _handle_escape(self) -> None:
         """Handle escape key."""
@@ -1036,6 +1073,56 @@ Save commonly-used filter combinations with File → Save Filter.</p>
         wb.save(path)
         self.append_log(f"Exported {len(self.filtered_vulnerabilities)} vulnerabilities to {path}")
 
+    def _show_table_context_menu(self, position: QtCore.QPoint) -> None:
+        """Show context menu for table rows."""
+        index = self.table.indexAt(position)
+        if not index.isValid():
+            return
+
+        menu = QtWidgets.QMenu()
+
+        # Get the vulnerability data for this row
+        source_index = self.proxy_model.mapToSource(index)
+        vuln = self.vuln_model.getVulnerability(source_index.row())
+
+        if vuln:
+            view_details_action = menu.addAction("View Details")
+            view_details_action.triggered.connect(lambda: self._show_vuln_details(vuln))
+
+            menu.addSeparator()
+
+            copy_id_action = menu.addAction("Copy ID")
+            copy_id_action.triggered.connect(
+                lambda: QtWidgets.QApplication.clipboard().setText(vuln.get("id", ""))
+            )
+
+            if vuln.get("externalUrl"):
+                copy_url_action = menu.addAction("Copy External URL")
+                copy_url_action.triggered.connect(
+                    lambda: QtWidgets.QApplication.clipboard().setText(vuln.get("externalUrl", ""))
+                )
+
+        menu.exec(self.table.viewport().mapToGlobal(position))
+
+    def _show_vuln_details(self, vuln: Dict) -> None:
+        """Show detailed information about a vulnerability."""
+        details = json.dumps(vuln, indent=2)
+        msg_box = QtWidgets.QMessageBox(self)
+        msg_box.setWindowTitle("Vulnerability Details")
+        msg_box.setText(f"<h3>{vuln.get('name', 'Unknown')}</h3>")
+        msg_box.setInformativeText(
+            f"<b>ID:</b> {vuln.get('id', 'N/A')}<br>"
+            f"<b>Severity:</b> {vuln.get('severity', 'N/A')}<br>"
+            f"<b>Asset:</b> {vuln.get('targetId', 'N/A')}<br>"
+            f"<b>Status:</b> {'Remediated' if vuln.get('deactivateMetadata') else 'Active'}"
+        )
+        msg_box.setDetailedText(details)
+        msg_box.exec()
+
+    def _on_selection_changed(self) -> None:
+        """Handle table selection changes."""
+        self._update_status_bar()
+
     def closeEvent(self, event: QtGui.QCloseEvent) -> None:
         """Handle window close event to save settings."""
         # Save window geometry and state
@@ -1047,7 +1134,11 @@ Save commonly-used filter combinations with File → Save Filter.</p>
         if db_path:
             self.settings_manager.save_database_path(db_path)
 
-        # Clean up worker thread if running
+        # Cancel all active threads
+        self.thread_manager.cancel_all()
+        self.thread_manager.wait_for_all(timeout_ms=3000)
+
+        # Clean up legacy worker thread if running
         if self.worker_thread is not None:
             self.worker_thread.quit()
             self.worker_thread.wait()
