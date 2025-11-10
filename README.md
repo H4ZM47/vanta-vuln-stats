@@ -39,8 +39,33 @@ A comprehensive Python utility for fetching and analyzing vulnerability data fro
   - Export statistics to JSON
   - Export filtered vulnerability list to JSON
 
+## Project Structure
+
+The project is organized into modular components for maintainability and extensibility:
+
+```
+vanta-vuln-stats/
+├── core/                  # Core business logic
+│   ├── __init__.py
+│   ├── api_client.py     # Vanta API client
+│   ├── database.py       # SQLite database manager
+│   └── stats.py          # Statistics processor
+├── gui/                   # GUI components (Qt-based)
+│   └── __init__.py
+├── tests/                 # Unit and integration tests
+├── docs/                  # Documentation
+├── vanta_vuln_stats.py   # CLI script
+├── vanta_vuln_gui.py     # GUI application
+├── main.py               # Main entry point (CLI/GUI selector)
+├── requirements.txt      # Core dependencies
+└── requirements-gui.txt  # GUI dependencies
+```
+
 ## Installation
 
+### Core Installation (CLI Only)
+
+1. Install core dependencies:
 ### Standard Installation (CLI & GUI)
 
 1. Install dependencies:
@@ -58,6 +83,22 @@ uv pip install -r requirements.txt
 }
 ```
 
+### GUI Installation (Optional)
+
+To use the graphical user interface, install the additional GUI dependencies:
+
+```bash
+pip install -r requirements-gui.txt
+```
+
+This includes:
+- PySide6 (Qt framework)
+- matplotlib (plotting)
+- pyqtgraph (real-time plots)
+- keyring (secure credential storage)
+- openpyxl (Excel export)
+- reportlab (PDF reports)
+- pytest-qt (GUI testing)
 ### macOS App Bundle
 
 For macOS users, you can build a standalone app bundle that doesn't require Python installation:
@@ -80,11 +121,38 @@ This creates a native macOS application at `dist/vanta_vuln_gui.app` that you ca
 
 ## Usage
 
-### Basic Usage
+The utility can be run in two modes: **CLI** (command-line interface) or **GUI** (graphical interface).
+
+### Quick Start
+
+**Using main.py (Recommended):**
+```bash
+# CLI mode (default)
+python main.py
+
+# GUI mode
+python main.py --gui
+
+# CLI with options
+python main.py --sync --verbose
+```
+
+**Direct script usage:**
+```bash
+# CLI
+python vanta_vuln_stats.py
+
+# GUI
+python vanta_vuln_gui.py
+```
+
+### Basic CLI Usage
 
 Get all vulnerability statistics (uses cached data if available):
 ```bash
 python vanta_vuln_stats.py
+# or
+python main.py
 ```
 
 ### Database & Caching

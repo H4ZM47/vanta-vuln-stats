@@ -1,0 +1,20 @@
+# GUI Requirements for Vanta Vulnerability Statistics Utility
+# Install these dependencies for the graphical user interface
+
+# Qt Framework
+PySide6>=6.6.0
+
+# Plotting and Visualization
+matplotlib>=3.8.0
+pyqtgraph>=0.13.0
+
+# System Integration
+keyring>=24.0.0
+
+# Export Formats
+openpyxl>=3.1.0
+reportlab>=4.0.0
+
+# Testing
+pytest>=7.4.0
+pytest-qt>=4.2.0
