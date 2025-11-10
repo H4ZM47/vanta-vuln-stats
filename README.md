@@ -2,6 +2,27 @@
 
 A comprehensive Python utility for fetching and analyzing vulnerability data from the Vanta API with local SQLite database caching and change tracking.
 
+## Quick Start
+
+Get up and running in under 2 minutes on macOS:
+
+```bash
+# 1. Install everything automatically
+./install_macos.sh
+
+# 2. Activate the virtual environment
+source venv/bin/activate
+
+# 3. Edit credentials file with your Vanta API keys
+nano VANTA_API_CREDENTIALS.env
+
+# 4. Sync data and view statistics
+python vanta_vuln_stats.py --sync
+
+# Or launch the GUI
+python vanta_vuln_gui.py
+```
+
 ## Features
 
 - **Data Fetching & Caching:**
@@ -63,45 +84,64 @@ vanta-vuln-stats/
 
 ## Installation
 
-### Core Installation (CLI Only)
+### Quick Start (macOS)
 
-1. Install core dependencies:
-### Standard Installation (CLI & GUI)
-
-1. Install dependencies:
-```bash
-pip install -r requirements.txt
-# or using uv:
-uv pip install -r requirements.txt
-```
-
-2. Ensure your credentials are in `VANTA_API_CREDENTIALS.env` file in the following format:
-```json
-{
-  "client_id": "your_client_id",
-  "client_secret": "your_client_secret"
-}
-```
-
-### GUI Installation (Optional)
-
-To use the graphical user interface, install the additional GUI dependencies:
+For macOS users, we provide an automated installation script that sets up everything:
 
 ```bash
-pip install -r requirements-gui.txt
+./install_macos.sh
 ```
 
-This includes:
-- PySide6 (Qt framework)
-- matplotlib (plotting)
-- pyqtgraph (real-time plots)
-- keyring (secure credential storage)
-- openpyxl (Excel export)
-- reportlab (PDF reports)
-- pytest-qt (GUI testing)
-### macOS App Bundle
+This script will:
+- ✓ Verify system requirements (macOS, Python 3.8-3.13)
+- ✓ Create a Python virtual environment
+- ✓ Install all dependencies (CLI and GUI)
+- ✓ Create credentials template
+- ✓ Verify the installation
+- ✓ Provide clear next steps
 
-For macOS users, you can build a standalone app bundle that doesn't require Python installation:
+**Important:** Python 3.14+ is not yet supported due to PySide6 compatibility. Use Python 3.12 or 3.13.
+
+If you don't have Python installed:
+```bash
+brew install python@3.13
+```
+
+### Manual Installation (All Platforms)
+
+For non-macOS systems or if you prefer manual installation:
+
+1. **Create and activate a virtual environment:**
+   ```bash
+   python3 -m venv venv
+   source venv/bin/activate  # On Windows: venv\Scripts\activate
+   ```
+
+2. **Install dependencies:**
+   ```bash
+   pip install --upgrade pip
+   pip install -r requirements.txt
+   pip install -r requirements-gui.txt
+   ```
+
+3. **Create credentials file:**
+
+   Create `VANTA_API_CREDENTIALS.env` with your Vanta API credentials:
+   ```json
+   {
+     "client_id": "your_client_id",
+     "client_secret": "your_client_secret"
+   }
+   ```
+
+4. **Verify installation:**
+   ```bash
+   python vanta_vuln_stats.py --help
+   ```
+
+### Building macOS App Bundle (Optional)
+
+For macOS users who want a standalone application:
 
 ```bash
 ./build_macos_app.sh
@@ -112,11 +152,7 @@ This creates a native macOS application at `dist/vanta_vuln_gui.app` that you ca
 - Copy to your Applications folder
 - Distribute to other macOS users (via DMG)
 
-> **Python version note:** PySide6 (the Qt binding used by the GUI) does not
-> currently publish wheels for Python 3.14. Use Python 3.12 or 3.13 when
-> running the build script to avoid dependency installation failures.
-
-**For detailed instructions**, see [MACOS_APP_BUILD.md](MACOS_APP_BUILD.md) which covers:
+**For detailed build instructions**, see [MACOS_APP_BUILD.md](MACOS_APP_BUILD.md) which covers:
 - Building the app bundle
 - Creating a custom icon
 - Creating DMG installers
@@ -404,6 +440,34 @@ This allows for:
 4. **Trend Analysis:** Query the `vulnerability_history` table directly for historical data
 
 ## Troubleshooting
+
+### Installation Issues
+
+**Python Version Errors**
+- If you see errors about PySide6 not being available for Python 3.14, install Python 3.13:
+  ```bash
+  brew install python@3.13
+  /opt/homebrew/bin/python3.13 -m venv venv
+  source venv/bin/activate
+  ./install_macos.sh
+  ```
+
+**Permission Denied When Running Scripts**
+- Make the scripts executable:
+  ```bash
+  chmod +x install_macos.sh
+  chmod +x build_macos_app.sh
+  ```
+
+**Import Errors After Installation**
+- Make sure you've activated the virtual environment:
+  ```bash
+  source venv/bin/activate
+  ```
+- Reinstall dependencies:
+  ```bash
+  pip install -r requirements.txt -r requirements-gui.txt
+  ```
 
 ### Authentication Errors
 Ensure your credentials file is properly formatted and contains valid `client_id` and `client_secret`.
