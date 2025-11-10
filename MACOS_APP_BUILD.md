@@ -5,7 +5,7 @@ This guide explains how to package the Vanta Vulnerability Statistics utility as
 ## Prerequisites
 
 - **macOS** system (for final build)
-- **Python 3.8+** installed
+- **Python 3.8+** installed (Python 3.12 or 3.13 recommended for the GUI build)
 - **Xcode Command Line Tools** (install via: `xcode-select --install`)
 
 ## Quick Start
@@ -129,6 +129,12 @@ Make sure you've installed dependencies:
 ```bash
 pip install -r requirements.txt
 ```
+
+If the dependency installation fails with messages about unsupported Python
+versions, ensure you are using Python 3.12 or 3.13. PySide6 does not yet ship
+prebuilt wheels for Python 3.14, so installing with a newer interpreter will
+fail. Install an older Python (for example via `brew install python@3.12`) and
+rerun the build.
 
 ### App Won't Open: "App is damaged"
 

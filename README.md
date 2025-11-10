@@ -112,6 +112,10 @@ This creates a native macOS application at `dist/vanta_vuln_gui.app` that you ca
 - Copy to your Applications folder
 - Distribute to other macOS users (via DMG)
 
+> **Python version note:** PySide6 (the Qt binding used by the GUI) does not
+> currently publish wheels for Python 3.14. Use Python 3.12 or 3.13 when
+> running the build script to avoid dependency installation failures.
+
 **For detailed instructions**, see [MACOS_APP_BUILD.md](MACOS_APP_BUILD.md) which covers:
 - Building the app bundle
 - Creating a custom icon
