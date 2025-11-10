@@ -33,9 +33,9 @@ OPTIONS = {
             }
         ],
     },
-    'packages': ['PySide6', 'requests', 'sqlite3', 'certifi'],
+    'packages': ['PySide6', 'requests', 'sqlite3', 'certifi', 'matplotlib'],
     'includes': ['vanta_vuln_stats'],
-    'excludes': ['tkinter', 'matplotlib', 'numpy', 'pandas'],
+    'excludes': ['tkinter', 'numpy', 'pandas'],
     'semi_standalone': False,
     'site_packages': True,
 }
@@ -53,5 +53,6 @@ setup(
     install_requires=[
         'requests>=2.31.0',
         'PySide6>=6.7.0',
+        'matplotlib>=3.8.0',
     ],
 )
