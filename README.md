@@ -140,6 +140,23 @@ Show detailed progress:
 python vanta_vuln_stats.py --verbose
 ```
 
+## Graphical Interface
+
+A cross-platform Qt GUI is available if you prefer a visual workflow:
+
+```bash
+python vanta_vuln_gui.py
+```
+
+The GUI lets you:
+- Sync directly from the Vanta API (using the same credential file as the CLI)
+- Load previously cached data from the SQLite database
+- Apply the same filters (date ranges, severity, CVE, asset) via form controls
+- View summary statistics and the filtered vulnerability table
+- Export the filtered vulnerability list to JSON
+
+Make sure the credentials and database paths at the top of the window match your environment. Once you load data, click **Apply Filters** to refresh the table and stats, or **Export Filtered JSON** to save the current results.
+
 ## Command-Line Arguments
 
 ### Database & Sync Options
