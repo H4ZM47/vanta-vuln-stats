@@ -22,7 +22,24 @@ fi
 # Check Python version
 echo "Checking Python version..."
 PYTHON_VERSION=$(python3 --version 2>&1 | awk '{print $2}')
+PYTHON_MAJOR=$(echo "$PYTHON_VERSION" | cut -d. -f1)
+PYTHON_MINOR=$(echo "$PYTHON_VERSION" | cut -d. -f2)
 echo "Found Python $PYTHON_VERSION"
+
+if [ "$PYTHON_MAJOR" -eq 3 ] && [ "$PYTHON_MINOR" -ge 14 ]; then
+    echo ""
+    echo "ERROR: Python $PYTHON_VERSION is not supported for building the GUI."
+    echo "PySide6 has not yet published wheels for Python 3.14, so the dependency"
+    echo "installation will fail. Please install Python 3.12 or 3.13 and re-run"
+    echo "this script using that interpreter."
+    echo ""
+    echo "Recommended steps on macOS:"
+    echo "  1. brew install python@3.12"
+    echo "  2. python3.12 -m venv venv"
+    echo "  3. source venv/bin/activate"
+    echo "  4. ./build_macos_app.sh"
+    exit 1
+fi
 echo ""
 
 # Create virtual environment if it doesn't exist

@@ -1,4 +1,5 @@
 requests>=2.31.0
+# PySide6 currently ships wheels only for Python < 3.14.
 PySide6>=6.7.0
 py2app>=0.28.0
 
