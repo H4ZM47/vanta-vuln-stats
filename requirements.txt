@@ -1,6 +1,7 @@
 requests>=2.31.0
 # PySide6 currently ships wheels only for Python < 3.14.
 PySide6>=6.7.0
+matplotlib>=3.8.0
 py2app>=0.28.0
 
 # Optional Lambda dependencies (install separately if deploying to Lambda)
