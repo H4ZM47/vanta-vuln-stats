@@ -161,18 +161,8 @@ class DataService {
         remediationsStats.total += stats.total;
       }
 
-      // Record final sync history
-      const now = require('dayjs')().toISOString();
-      this.database.statements.insertSync.run({
-        sync_date: now,
-        vulnerabilities_count: vulnerabilitiesStats.total,
-        new_count: vulnerabilitiesStats.new,
-        updated_count: vulnerabilitiesStats.updated,
-        remediated_count: vulnerabilitiesStats.remediated,
-      });
-
       // Record combined sync history
-      this.database.recordSyncHistory(vulnerabilityStats, remediationStats);
+      this.database.recordSyncHistory(vulnerabilitiesStats, remediationsStats);
 
       return {
         vulnerabilities: vulnerabilitiesStats,
