@@ -2,6 +2,7 @@ const axios = require('axios');
 
 const BASE_URL = 'https://api.vanta.com/v1';
 const AUTH_URL = 'https://api.vanta.com/oauth/token';
+const MAX_PAGE_SIZE = 100;
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -97,8 +98,8 @@ class VantaApiClient {
   async paginate({ endpoint, params = {}, onBatch, signal }) {
     const results = [];
     let pageCursor;
-    const { pageSize: initialPageSize = 100, ...restParams } = params;
-    let currentPageSize = initialPageSize;
+    const { pageSize: initialPageSize = MAX_PAGE_SIZE, ...restParams } = params;
+    let currentPageSize = Math.min(initialPageSize, MAX_PAGE_SIZE);
 
     do {
       let response;
@@ -153,7 +154,7 @@ class VantaApiClient {
     return results;
   }
 
-  async getVulnerabilities({ pageSize = 100, onBatch, filters = {}, signal } = {}) {
+  async getVulnerabilities({ pageSize = MAX_PAGE_SIZE, onBatch, filters = {}, signal } = {}) {
     return this.paginate({
       endpoint: '/vulnerabilities',
       params: { pageSize, ...filters },
@@ -162,7 +163,7 @@ class VantaApiClient {
     });
   }
 
-  async getRemediations({ pageSize = 100, onBatch, filters = {}, signal } = {}) {
+  async getRemediations({ pageSize = MAX_PAGE_SIZE, onBatch, filters = {}, signal } = {}) {
     return this.paginate({
       endpoint: '/vulnerability-remediations',
       params: { pageSize, ...filters },
