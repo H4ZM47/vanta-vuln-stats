@@ -209,6 +209,34 @@
     <div id="settingsTab" class="tab-content">
       <section class="card">
         <header class="card__header">
+          <h2>Sync Operations</h2>
+          <p>Control data synchronization from the Vanta API.</p>
+        </header>
+        <div class="card__body">
+          <div class="sync-controls">
+            <button id="startSyncButton" class="primary">Start Sync</button>
+            <button id="pauseSyncButton" class="secondary" style="display: none;">Pause</button>
+            <button id="resumeSyncButton" class="secondary" style="display: none;">Resume</button>
+            <button id="stopSyncButton" class="danger" style="display: none;">Stop</button>
+          </div>
+        </div>
+      </section>
+
+      <article class="card">
+        <header class="card__header">
+          <h2>Sync History</h2>
+          <p>Chronological log of sync activity with timestamped entries.</p>
+        </header>
+        <div class="card__body">
+          <div id="syncHistoryLog" class="sync-history-log"></div>
+          <div id="syncHistoryEmpty" class="sync-history-empty" style="display: none;">
+            No syncs have been recorded.
+          </div>
+        </div>
+      </article>
+
+      <section class="card">
+        <header class="card__header">
           <h2>API Credentials</h2>
           <p>Provide a Vanta API client configured with the <code>vanta-api.all:read</code> scope.</p>
         </header>
@@ -239,34 +267,6 @@
           </p>
         </div>
       </section>
-
-      <section class="card">
-        <header class="card__header">
-          <h2>Sync Operations</h2>
-          <p>Control data synchronization from the Vanta API.</p>
-        </header>
-        <div class="card__body">
-          <div class="sync-controls">
-            <button id="startSyncButton" class="primary">Start Sync</button>
-            <button id="pauseSyncButton" class="secondary" style="display: none;">Pause</button>
-            <button id="resumeSyncButton" class="secondary" style="display: none;">Resume</button>
-            <button id="stopSyncButton" class="danger" style="display: none;">Stop</button>
-          </div>
-        </div>
-      </section>
-
-      <article class="card">
-        <header class="card__header">
-          <h2>Sync History</h2>
-          <p>Chronological log of sync activity with timestamped entries.</p>
-        </header>
-        <div class="card__body">
-          <div id="syncHistoryLog" class="sync-history-log"></div>
-          <div id="syncHistoryEmpty" class="sync-history-empty" style="display: none;">
-            No syncs have been recorded.
-          </div>
-        </div>
-      </article>
     </div>
   </main>
 
