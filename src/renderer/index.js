@@ -1,10 +1,23 @@
 const PAGE_SIZE = 25;
 
 const elements = {
+  // Tab navigation
+  tabButtons: document.querySelectorAll('.tab-button'),
+  vulnerabilitiesTab: document.getElementById('vulnerabilitiesTab'),
+  settingsTab: document.getElementById('settingsTab'),
+  reportForm: document.getElementById('reportForm'),
+  reportFormat: document.getElementById('reportFormat'),
+  includeRemediations: document.getElementById('includeRemediations'),
+  applyFilters: document.getElementById('applyFilters'),
+  reportStatus: document.getElementById('reportStatus'),
+
+  // Credentials
   clientId: document.getElementById('clientId'),
   clientSecret: document.getElementById('clientSecret'),
   saveCredentials: document.getElementById('saveCredentials'),
   credentialsStatus: document.getElementById('credentialsStatus'),
+
+  // Sync controls
   startSyncButton: document.getElementById('startSyncButton'),
   pauseSyncButton: document.getElementById('pauseSyncButton'),
   resumeSyncButton: document.getElementById('resumeSyncButton'),
@@ -12,9 +25,13 @@ const elements = {
   syncStatusVulnerabilities: document.getElementById('syncStatusVulnerabilities'),
   syncStatusRemediations: document.getElementById('syncStatusRemediations'),
   syncStatusGeneral: document.getElementById('syncStatusGeneral'),
+
+  // Statistics and history
   statistics: document.getElementById('statistics'),
   syncHistoryLog: document.getElementById('syncHistoryLog'),
   syncHistoryEmpty: document.getElementById('syncHistoryEmpty'),
+
+  // Filters
   filtersForm: document.getElementById('filters'),
   severity: document.getElementById('severity'),
   status: document.getElementById('status'),
@@ -27,13 +44,19 @@ const elements = {
   dateRemediatedStart: document.getElementById('dateRemediatedStart'),
   dateRemediatedEnd: document.getElementById('dateRemediatedEnd'),
   clearFilters: document.getElementById('clearFilters'),
+
+  // Vulnerability table
   vulnerabilityTable: document.getElementById('vulnerabilityTable'),
   paginationStatus: document.getElementById('paginationStatus'),
   prevPage: document.getElementById('prevPage'),
   nextPage: document.getElementById('nextPage'),
+
+  // Details
   vulnerabilityDetails: document.getElementById('vulnerabilityDetails'),
   remediationDetails: document.getElementById('remediationDetails'),
   detailsSubtitle: document.getElementById('detailsSubtitle'),
+
+  // Database
   databasePath: document.getElementById('databasePath'),
 };
 
@@ -85,6 +108,26 @@ const formatDateTime = (value) => {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
   return date.toLocaleString();
+};
+
+const switchTab = (tabName) => {
+  // Update tab buttons
+  elements.tabButtons.forEach((button) => {
+    if (button.getAttribute('data-tab') === tabName) {
+      button.classList.add('active');
+    } else {
+      button.classList.remove('active');
+    }
+  });
+
+  // Update tab content - rely on CSS classes, not inline styles
+  if (tabName === 'vulnerabilities') {
+    elements.vulnerabilitiesTab.classList.add('active');
+    elements.settingsTab.classList.remove('active');
+  } else if (tabName === 'settings') {
+    elements.settingsTab.classList.add('active');
+    elements.vulnerabilitiesTab.classList.remove('active');
+  }
 };
 
 const updateSyncButtons = (syncState) => {
@@ -419,7 +462,312 @@ const handleColumnSort = async (event) => {
   resetDetails();
 };
 
+const generateCSVReport = (vulnerabilities, remediationsMap, includeRemediations) => {
+  const headers = [
+    'ID',
+    'Name',
+    'Severity',
+    'CVSS Score',
+    'Status',
+    'Fixable',
+    'Integration',
+    'Asset ID',
+    'First Detected',
+    'Deactivated On',
+    'CVE',
+    'Description',
+  ];
+
+  if (includeRemediations) {
+    headers.push('Remediations Count', 'Latest Remediation Date', 'Remediation Status');
+  }
+
+  const escapeCSV = (value) => {
+    if (value == null) return '';
+    const str = String(value);
+    if (str.includes(',') || str.includes('"') || str.includes('\n')) {
+      return `"${str.replace(/"/g, '""')}"`;
+    }
+    return str;
+  };
+
+  const rows = [headers.map(escapeCSV).join(',')];
+
+  vulnerabilities.forEach((vuln) => {
+    const row = [
+      vuln.id,
+      vuln.name,
+      vuln.severity,
+      vuln.cvss_score,
+      vuln.deactivated_on ? 'Remediated' : 'Active',
+      vuln.fixable ? 'Yes' : 'No',
+      vuln.integration_id,
+      vuln.target_id,
+      formatDate(vuln.first_detected),
+      formatDate(vuln.deactivated_on),
+      vuln.cve,
+      vuln.description,
+    ];
+
+    if (includeRemediations) {
+      const rems = remediationsMap[vuln.id] || [];
+      row.push(
+        rems.length,
+        rems.length > 0 ? formatDate(rems[0].remediationDate || rems[0].detectedDate) : '',
+        rems.length > 0 ? rems[0].status : ''
+      );
+    }
+
+    rows.push(row.map(escapeCSV).join(','));
+  });
+
+  return rows.join('\n');
+};
+
+const escapeHTML = (value) => {
+  if (value == null) return '—';
+  return String(value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+};
+
+const generateHTMLReport = (vulnerabilities, remediationsMap, includeRemediations) => {
+  const timestamp = escapeHTML(new Date().toLocaleString());
+  const rows = vulnerabilities
+    .map((vuln) => {
+      const rems = remediationsMap[vuln.id] || [];
+      const remediationInfo = includeRemediations
+        ? `<td>${escapeHTML(rems.length)}</td><td>${rems.length > 0 ? escapeHTML(formatDate(rems[0].remediationDate || rems[0].detectedDate)) : '—'}</td>`
+        : '';
+
+      // Note: severity class is safe as it's validated against known values
+      const severityClass = ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW'].includes(vuln.severity) ? vuln.severity : 'UNKNOWN';
+
+      return `
+        <tr>
+          <td>${escapeHTML(vuln.id)}</td>
+          <td>${escapeHTML(vuln.name)}</td>
+          <td class="severity-${severityClass}">${escapeHTML(vuln.severity || 'UNKNOWN')}</td>
+          <td>${escapeHTML(vuln.cvss_score)}</td>
+          <td>${escapeHTML(vuln.deactivated_on ? 'Remediated' : 'Active')}</td>
+          <td>${escapeHTML(vuln.fixable ? 'Yes' : 'No')}</td>
+          <td>${escapeHTML(vuln.integration_id)}</td>
+          <td>${escapeHTML(vuln.target_id)}</td>
+          <td>${escapeHTML(formatDate(vuln.first_detected))}</td>
+          <td>${escapeHTML(formatDate(vuln.deactivated_on))}</td>
+          <td>${escapeHTML(vuln.cve)}</td>
+          ${remediationInfo}
+        </tr>
+      `;
+    })
+    .join('');
+
+  const remediationColumns = includeRemediations
+    ? '<th>Remediations</th><th>Latest Remediation</th>'
+    : '';
+
+  return `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Vanta Vulnerability Report</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+      margin: 2rem;
+      background: #f8fafc;
+      color: #1e293b;
+    }
+    h1 {
+      color: #0f172a;
+      margin-bottom: 0.5rem;
+    }
+    .meta {
+      color: #64748b;
+      margin-bottom: 2rem;
+      font-size: 0.875rem;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      background: white;
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+      border-radius: 0.5rem;
+      overflow: hidden;
+    }
+    th {
+      background: #0f172a;
+      color: white;
+      padding: 0.75rem;
+      text-align: left;
+      font-weight: 600;
+      font-size: 0.875rem;
+    }
+    td {
+      padding: 0.75rem;
+      border-bottom: 1px solid #e2e8f0;
+      font-size: 0.875rem;
+    }
+    tr:last-child td {
+      border-bottom: none;
+    }
+    tr:hover {
+      background: #f8fafc;
+    }
+    .severity-CRITICAL {
+      color: #dc2626;
+      font-weight: 600;
+    }
+    .severity-HIGH {
+      color: #ea580c;
+      font-weight: 600;
+    }
+    .severity-MEDIUM {
+      color: #d97706;
+    }
+    .severity-LOW {
+      color: #65a30d;
+    }
+  </style>
+</head>
+<body>
+  <h1>Vanta Vulnerability Report</h1>
+  <div class="meta">
+    Generated on ${timestamp}<br>
+    Total vulnerabilities: ${escapeHTML(vulnerabilities.length)}
+  </div>
+  <table>
+    <thead>
+      <tr>
+        <th>ID</th>
+        <th>Name</th>
+        <th>Severity</th>
+        <th>CVSS</th>
+        <th>Status</th>
+        <th>Fixable</th>
+        <th>Integration</th>
+        <th>Asset</th>
+        <th>Detected</th>
+        <th>Deactivated</th>
+        <th>CVE</th>
+        ${remediationColumns}
+      </tr>
+    </thead>
+    <tbody>
+      ${rows}
+    </tbody>
+  </table>
+</body>
+</html>
+  `;
+};
+
 const attachEventListeners = () => {
+  // Tab switching
+  elements.tabButtons.forEach((button) => {
+    button.addEventListener('click', () => {
+      const tabName = button.getAttribute('data-tab');
+      switchTab(tabName);
+    });
+  });
+
+  // Report generation
+  elements.reportForm.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    elements.reportStatus.textContent = 'Generating report...';
+
+    try {
+      const format = elements.reportFormat.value;
+      const includeRemediations = elements.includeRemediations.value === 'yes';
+      const useFilters = elements.applyFilters.value === 'yes';
+
+      // Get all vulnerabilities (or filtered ones) by fetching all pages
+      const filters = useFilters ? state.filters : defaultFilters();
+      const vulnerabilities = [];
+      const pageSize = 1000; // Fetch in batches of 1000
+      let offset = 0;
+      let hasMore = true;
+
+      while (hasMore) {
+        elements.reportStatus.textContent = `Generating report... (fetching vulnerabilities: ${vulnerabilities.length})`;
+        const response = await window.vanta.listVulnerabilities({
+          filters,
+          limit: pageSize,
+          offset,
+          sortColumn: state.sortColumn,
+          sortDirection: state.sortDirection,
+        });
+
+        vulnerabilities.push(...response.data);
+        offset += pageSize;
+        hasMore = response.data.length === pageSize && vulnerabilities.length < response.total;
+      }
+
+      // Get remediations if requested, batched to avoid overwhelming IPC
+      let remediationsMap = {};
+      if (includeRemediations) {
+        const batchSize = 50;
+        for (let i = 0; i < vulnerabilities.length; i += batchSize) {
+          elements.reportStatus.textContent = `Generating report... (fetching remediations: ${i}/${vulnerabilities.length})`;
+          const batch = vulnerabilities.slice(i, i + batchSize);
+          const remediationPromises = batch.map((vuln) =>
+            window.vanta.getRemediations(vuln.id).then((rems) => ({ id: vuln.id, remediations: rems }))
+          );
+          const remediationResults = await Promise.all(remediationPromises);
+          remediationResults.forEach((r) => {
+            remediationsMap[r.id] = r.remediations;
+          });
+        }
+      }
+
+      // Generate report based on format
+      let content;
+      let filename;
+      let mimeType;
+
+      if (format === 'csv') {
+        content = generateCSVReport(vulnerabilities, remediationsMap, includeRemediations);
+        filename = `vanta-vulnerabilities-${Date.now()}.csv`;
+        mimeType = 'text/csv';
+      } else if (format === 'json') {
+        const reportData = includeRemediations
+          ? vulnerabilities.map((v) => ({ ...v, remediations: remediationsMap[v.id] || [] }))
+          : vulnerabilities;
+        content = JSON.stringify(reportData, null, 2);
+        filename = `vanta-vulnerabilities-${Date.now()}.json`;
+        mimeType = 'application/json';
+      } else if (format === 'html') {
+        content = generateHTMLReport(vulnerabilities, remediationsMap, includeRemediations);
+        filename = `vanta-vulnerabilities-${Date.now()}.html`;
+        mimeType = 'text/html';
+      }
+
+      // Trigger download
+      const blob = new Blob([content], { type: mimeType });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      a.click();
+      URL.revokeObjectURL(url);
+
+      elements.reportStatus.textContent = `Report generated: ${filename}`;
+      setTimeout(() => {
+        elements.reportStatus.textContent = '';
+      }, 5000);
+    } catch (error) {
+      elements.reportStatus.textContent = `Failed to generate report: ${error.message}`;
+      setTimeout(() => {
+        elements.reportStatus.textContent = '';
+      }, 5000);
+    }
+  });
+
   elements.saveCredentials.addEventListener('click', async () => {
     elements.credentialsStatus.textContent = 'Saving…';
     await window.vanta.updateSettings({
