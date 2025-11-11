@@ -92,14 +92,42 @@ class VantaApiClient {
   async paginate({ endpoint, params = {}, onBatch, signal }) {
     const results = [];
     let pageCursor;
+    const { pageSize: initialPageSize = 100, ...restParams } = params;
+    let currentPageSize = initialPageSize;
 
     do {
-      const response = await this.requestWithRetry({
-        method: 'get',
-        url: endpoint,
-        params: { ...params, pageCursor },
-        signal,
-      });
+      let response;
+      try {
+        response = await this.requestWithRetry({
+          method: 'get',
+          url: endpoint,
+          params: { ...restParams, pageCursor, pageSize: currentPageSize },
+          signal,
+        });
+      } catch (error) {
+        const status = error?.response?.status;
+        const canDownsize = status && status >= 500 && currentPageSize > 1;
+        if (canDownsize) {
+          currentPageSize = Math.max(1, Math.floor(currentPageSize / 2));
+          console.warn(
+            `[VantaApiClient] ${endpoint} returned ${status}. Retrying with pageSize=${currentPageSize}.`,
+          );
+          continue;
+        }
+
+        const requestId =
+          error?.response?.headers?.['x-amzn-requestid'] ||
+          error?.response?.headers?.['x-amz-cf-id'] ||
+          error?.response?.headers?.['x-request-id'];
+        const metaParts = [
+          `endpoint=${endpoint}`,
+          `pageSize=${currentPageSize}`,
+          pageCursor ? `cursor=${pageCursor}` : null,
+          requestId ? `requestId=${requestId}` : null,
+        ].filter(Boolean);
+        const context = metaParts.length ? ` (${metaParts.join(', ')})` : '';
+        throw new Error(`Failed to paginate Vanta API${context}: ${error.message}`, { cause: error });
+      }
 
       const body = response.data || {};
       const pageData = body?.results?.data ?? [];
