@@ -123,12 +123,19 @@ graph TB
     Preload -->|Secure Bridge| Main
 
     %% Main Process Coordination
-    Main -->|sync:run<br/>stats:get<br/>vulnerabilities:list| DataService
-    Main -->|sync:progress<br/>sync:incremental| UI
+    Main -->|"sync:run
+    stats:get
+    vulnerabilities:list"| DataService
+    Main -->|"sync:progress
+    sync:incremental"| UI
 
     %% Data Service Orchestration
-    DataService -->|authenticate()<br/>getVulnerabilities()<br/>getRemediations()| ApiClient
-    DataService -->|storeVulnerabilitiesBatch()<br/>getStatistics()<br/>getVulnerabilities()| Database
+    DataService -->|"authenticate()
+    getVulnerabilities()
+    getRemediations()"| ApiClient
+    DataService -->|"storeVulnerabilitiesBatch()
+    getStatistics()
+    getVulnerabilities()"| Database
     DataService -->|formatStatistics()| Stats
     DataService -->|get/set credentials| Store
 
