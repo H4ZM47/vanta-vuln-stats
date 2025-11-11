@@ -341,6 +341,9 @@ class VulnerabilityDatabase {
         }
 
         this.statements.upsertVulnerability.run(payload);
+
+        // Update map so duplicate IDs within same batch are treated as updates
+        existingMap.set(row.id, payload.raw_data);
       });
 
       return { new: newCount, updated: updatedCount, remediated: remediatedCount, total: rows.length };
@@ -412,6 +415,9 @@ class VulnerabilityDatabase {
           updatedCount += 1;
         }
         this.statements.upsertRemediation.run(payload);
+
+        // Update map so duplicate IDs within same batch are treated as updates
+        existingMap.set(row.id, payload.raw_data);
       });
 
       return { new: newCount, updated: updatedCount, total: rows.length };
