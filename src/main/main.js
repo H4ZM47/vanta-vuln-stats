@@ -61,8 +61,12 @@ ipcMain.handle('sync:run', async () => {
     mainWindow.webContents.send('sync:progress', progress);
   };
 
+  const incrementalUpdateEmitter = (update) => {
+    mainWindow.webContents.send('sync:incremental', update);
+  };
+
   try {
-    const result = await dataService.syncData(progressEmitter);
+    const result = await dataService.syncData(progressEmitter, incrementalUpdateEmitter);
     mainWindow.webContents.send('sync:completed', result);
     return result;
   } catch (error) {

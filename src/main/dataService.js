@@ -33,7 +33,7 @@ class DataService {
     return merged;
   }
 
-  async syncData(progressCallback) {
+  async syncData(progressCallback, onIncrementalUpdate) {
     if (this.activeSync) {
       throw new Error('A sync is already in progress.');
     }
@@ -57,6 +57,10 @@ class DataService {
     try {
       const vulnerabilities = [];
       const remediations = [];
+      const BATCH_SIZE = 1000;
+
+      let vulnerabilitiesStats = { new: 0, updated: 0, remediated: 0, total: 0 };
+      let remediationsStats = { new: 0, updated: 0, total: 0 };
 
       // Fetch vulnerabilities and remediations in parallel for faster sync
       await Promise.all([
@@ -64,22 +68,80 @@ class DataService {
           onBatch: async (batch) => {
             vulnerabilities.push(...batch);
             progressCallback?.({ type: 'vulnerabilities', count: vulnerabilities.length });
+
+            // Flush to database every 1000 records
+            if (vulnerabilities.length >= BATCH_SIZE) {
+              const stats = this.database.storeVulnerabilitiesBatch(vulnerabilities);
+              vulnerabilitiesStats.new += stats.new;
+              vulnerabilitiesStats.updated += stats.updated;
+              vulnerabilitiesStats.remediated += stats.remediated;
+              vulnerabilitiesStats.total += stats.total;
+
+              // Notify about incremental update
+              onIncrementalUpdate?.({
+                type: 'vulnerabilities',
+                stats: { ...vulnerabilitiesStats },
+                flushed: vulnerabilities.length,
+              });
+
+              vulnerabilities.length = 0; // Clear the buffer
+            }
           },
         }),
         apiClient.getRemediations({
           onBatch: async (batch) => {
             remediations.push(...batch);
             progressCallback?.({ type: 'remediations', count: remediations.length });
+
+            // Flush to database every 1000 records
+            if (remediations.length >= BATCH_SIZE) {
+              const stats = this.database.storeRemediationsBatch(remediations);
+              remediationsStats.new += stats.new;
+              remediationsStats.updated += stats.updated;
+              remediationsStats.total += stats.total;
+
+              // Notify about incremental update
+              onIncrementalUpdate?.({
+                type: 'remediations',
+                stats: { ...remediationsStats },
+                flushed: remediations.length,
+              });
+
+              remediations.length = 0; // Clear the buffer
+            }
           },
         }),
       ]);
 
-      const vulnerabilityStats = this.database.storeVulnerabilities(vulnerabilities);
-      const remediationStats = this.database.storeRemediations(remediations);
+      // Store any remaining records
+      if (vulnerabilities.length > 0) {
+        const stats = this.database.storeVulnerabilitiesBatch(vulnerabilities);
+        vulnerabilitiesStats.new += stats.new;
+        vulnerabilitiesStats.updated += stats.updated;
+        vulnerabilitiesStats.remediated += stats.remediated;
+        vulnerabilitiesStats.total += stats.total;
+      }
+
+      if (remediations.length > 0) {
+        const stats = this.database.storeRemediationsBatch(remediations);
+        remediationsStats.new += stats.new;
+        remediationsStats.updated += stats.updated;
+        remediationsStats.total += stats.total;
+      }
+
+      // Record final sync history
+      const now = require('dayjs')().toISOString();
+      this.database.statements.insertSync.run({
+        sync_date: now,
+        vulnerabilities_count: vulnerabilitiesStats.total,
+        new_count: vulnerabilitiesStats.new,
+        updated_count: vulnerabilitiesStats.updated,
+        remediated_count: vulnerabilitiesStats.remediated,
+      });
 
       return {
-        vulnerabilities: vulnerabilityStats,
-        remediations: remediationStats,
+        vulnerabilities: vulnerabilitiesStats,
+        remediations: remediationsStats,
       };
     } finally {
       this.activeSync = null;
