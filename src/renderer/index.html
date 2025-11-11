@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Vanta Vulnerability Dashboard</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header class="app-header">
+    <div>
+      <h1>Vanta Vulnerability Dashboard</h1>
+      <p class="subtitle">Synchronize vulnerabilities from the Vanta API and explore rich statistics locally.</p>
+    </div>
+    <div class="header-actions">
+      <button id="syncButton" class="primary">Run Sync</button>
+      <span id="syncStatus" class="status"></span>
+    </div>
+  </header>
+
+  <main>
+    <section class="card">
+      <header class="card__header">
+        <h2>API Credentials</h2>
+        <p>Provide a Vanta API client configured with the <code>vanta-api.all:read</code> scope.</p>
+      </header>
+      <div class="card__body form-grid">
+        <label>
+          <span>Client ID</span>
+          <input id="clientId" type="text" placeholder="Enter client ID" />
+        </label>
+        <label>
+          <span>Client Secret</span>
+          <input id="clientSecret" type="password" placeholder="Enter client secret" />
+        </label>
+        <div class="form-actions">
+          <button id="saveCredentials" class="secondary">Save Credentials</button>
+          <span id="credentialsStatus" class="status"></span>
+        </div>
+      </div>
+    </section>
+
+    <section class="grid two-columns">
+      <article class="card">
+        <header class="card__header">
+          <h2>Current Statistics</h2>
+          <p>High-level overview of synchronized vulnerabilities.</p>
+        </header>
+        <div class="card__body" id="statistics"></div>
+      </article>
+
+      <article class="card">
+        <header class="card__header">
+          <h2>Sync History</h2>
+          <p>Recent sync operations and dataset changes.</p>
+        </header>
+        <div class="card__body">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Date</th>
+                <th>Total</th>
+                <th>New</th>
+                <th>Updated</th>
+                <th>Remediated</th>
+              </tr>
+            </thead>
+            <tbody id="syncHistoryBody"></tbody>
+          </table>
+        </div>
+      </article>
+    </section>
+
+    <section class="card">
+      <header class="card__header">
+        <h2>Vulnerability Explorer</h2>
+        <p>Filter, browse, and inspect synchronized vulnerabilities.</p>
+      </header>
+      <div class="card__body">
+        <form id="filters" class="filters">
+          <div class="filter-group">
+            <label>
+              <span>Severity</span>
+              <select id="severity" multiple>
+                <option value="CRITICAL">Critical</option>
+                <option value="HIGH">High</option>
+                <option value="MEDIUM">Medium</option>
+                <option value="LOW">Low</option>
+              </select>
+            </label>
+          </div>
+          <div class="filter-group">
+            <label>
+              <span>Status</span>
+              <select id="status">
+                <option value="all">All</option>
+                <option value="active">Active</option>
+                <option value="deactivated">Remediated</option>
+              </select>
+            </label>
+          </div>
+          <div class="filter-group">
+            <label>
+              <span>Fixability</span>
+              <select id="fixable">
+                <option value="any">Any</option>
+                <option value="fixable">Fixable</option>
+                <option value="not_fixable">Not Fixable</option>
+              </select>
+            </label>
+          </div>
+          <div class="filter-group">
+            <label>
+              <span>Integration</span>
+              <input id="integration" type="text" placeholder="Integration ID" />
+            </label>
+          </div>
+          <div class="filter-group">
+            <label>
+              <span>Asset ID</span>
+              <input id="assetId" type="text" placeholder="Asset identifier" />
+            </label>
+          </div>
+          <div class="filter-group">
+            <label>
+              <span>CVE / Name</span>
+              <input id="cve" type="text" placeholder="Search CVE or name" />
+            </label>
+          </div>
+          <div class="filter-group">
+            <label>
+              <span>Detected From</span>
+              <input id="dateIdentifiedStart" type="date" />
+            </label>
+          </div>
+          <div class="filter-group">
+            <label>
+              <span>Detected To</span>
+              <input id="dateIdentifiedEnd" type="date" />
+            </label>
+          </div>
+          <div class="filter-group">
+            <label>
+              <span>Remediated From</span>
+              <input id="dateRemediatedStart" type="date" />
+            </label>
+          </div>
+          <div class="filter-group">
+            <label>
+              <span>Remediated To</span>
+              <input id="dateRemediatedEnd" type="date" />
+            </label>
+          </div>
+          <div class="filter-actions">
+            <button type="submit" class="secondary">Apply Filters</button>
+            <button type="button" id="clearFilters" class="link">Clear</button>
+          </div>
+        </form>
+
+        <div class="table-wrapper">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Name</th>
+                <th>Severity</th>
+                <th>Integration</th>
+                <th>Asset</th>
+                <th>Detected</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody id="vulnerabilityTable"></tbody>
+          </table>
+        </div>
+        <div class="table-footer">
+          <span id="paginationStatus"></span>
+          <div class="pagination-controls">
+            <button id="prevPage" class="secondary">Previous</button>
+            <button id="nextPage" class="secondary">Next</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="card">
+      <header class="card__header">
+        <h2>Details</h2>
+        <p id="detailsSubtitle">Select a vulnerability to inspect its full payload and remediation history.</p>
+      </header>
+      <div class="card__body details">
+        <div>
+          <h3>Vulnerability Payload</h3>
+          <pre id="vulnerabilityDetails" class="code-block">No vulnerability selected.</pre>
+        </div>
+        <div>
+          <h3>Remediations</h3>
+          <pre id="remediationDetails" class="code-block">No vulnerability selected.</pre>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="app-footer">
+    <p>Database location: <span id="databasePath">Stored in the Electron user-data directory.</span></p>
+  </footer>
+
+  <script src="index.js"></script>
+</body>
+</html>
