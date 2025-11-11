@@ -22,9 +22,8 @@ const elements = {
   pauseSyncButton: document.getElementById('pauseSyncButton'),
   resumeSyncButton: document.getElementById('resumeSyncButton'),
   stopSyncButton: document.getElementById('stopSyncButton'),
-  syncStatusVulnerabilities: document.getElementById('syncStatusVulnerabilities'),
-  syncStatusRemediations: document.getElementById('syncStatusRemediations'),
-  syncStatusGeneral: document.getElementById('syncStatusGeneral'),
+  toast: document.getElementById('toast'),
+  toastMessage: document.getElementById('toastMessage'),
 
   // Statistics and history
   statistics: document.getElementById('statistics'),
@@ -232,33 +231,62 @@ const renderSyncHistory = (history) => {
   elements.syncHistoryLog.innerHTML = orderedHistory
     .map((item) => {
       const timestamp = formatDateTime(item.sync_date);
-      const segments = [];
+      let message = '';
+      let eventClass = '';
 
-      if (item.vulnerabilities_count !== undefined && item.vulnerabilities_count !== null) {
-        const vulnParts = [
-          `total ${formatNumber(item.vulnerabilities_count)}`,
-          `new ${formatNumber(item.vulnerabilities_new || 0)}`,
-          `updated ${formatNumber(item.vulnerabilities_updated || 0)}`,
-        ];
-        if (item.vulnerabilities_remediated !== undefined && item.vulnerabilities_remediated !== null) {
-          vulnParts.push(`remediated ${formatNumber(item.vulnerabilities_remediated || 0)}`);
+      // Handle new verbose event types
+      if (item.event_type) {
+        const eventType = item.event_type;
+        eventClass = `sync-log-${eventType}`;
+
+        // Use the message from the database
+        message = item.message || '';
+
+        // Add additional details for specific event types
+        if (eventType === 'flush') {
+          const details = item.details ? JSON.parse(item.details) : null;
+          if (details) {
+            const stats = details.type === 'vulnerabilities'
+              ? `(new: ${item.vulnerabilities_new || 0}, updated: ${item.vulnerabilities_updated || 0}, remediated: ${item.vulnerabilities_remediated || 0})`
+              : `(new: ${item.remediations_new || 0}, updated: ${item.remediations_updated || 0})`;
+            message += ` ${stats}`;
+          }
+        } else if (eventType === 'complete') {
+          const vulnTotal = item.vulnerabilities_count || 0;
+          const remTotal = item.remediations_count || 0;
+          message += ` — Vulnerabilities: ${formatNumber(vulnTotal)} (new: ${item.vulnerabilities_new || 0}, updated: ${item.vulnerabilities_updated || 0}, remediated: ${item.vulnerabilities_remediated || 0}) | Remediations: ${formatNumber(remTotal)} (new: ${item.remediations_new || 0}, updated: ${item.remediations_updated || 0})`;
         }
-        segments.push(`Vulnerabilities ${vulnParts.join(', ')}`);
-      }
+      } else {
+        // Legacy format for old entries without event_type
+        eventClass = 'sync-log-complete';
+        const segments = [];
 
-      if (item.remediations_count !== undefined && item.remediations_count !== null) {
-        const remParts = [
-          `total ${formatNumber(item.remediations_count)}`,
-          `new ${formatNumber(item.remediations_new || 0)}`,
-          `updated ${formatNumber(item.remediations_updated || 0)}`,
-        ];
-        segments.push(`Remediations ${remParts.join(', ')}`);
-      }
+        if (item.vulnerabilities_count !== undefined && item.vulnerabilities_count !== null) {
+          const vulnParts = [
+            `total ${formatNumber(item.vulnerabilities_count)}`,
+            `new ${formatNumber(item.vulnerabilities_new || 0)}`,
+            `updated ${formatNumber(item.vulnerabilities_updated || 0)}`,
+          ];
+          if (item.vulnerabilities_remediated !== undefined && item.vulnerabilities_remediated !== null) {
+            vulnParts.push(`remediated ${formatNumber(item.vulnerabilities_remediated || 0)}`);
+          }
+          segments.push(`Vulnerabilities ${vulnParts.join(', ')}`);
+        }
 
-      const message = segments.length ? `Sync completed — ${segments.join(' | ')}` : 'Sync completed.';
+        if (item.remediations_count !== undefined && item.remediations_count !== null) {
+          const remParts = [
+            `total ${formatNumber(item.remediations_count)}`,
+            `new ${formatNumber(item.remediations_new || 0)}`,
+            `updated ${formatNumber(item.remediations_updated || 0)}`,
+          ];
+          segments.push(`Remediations ${remParts.join(', ')}`);
+        }
+
+        message = segments.length ? `Sync completed — ${segments.join(' | ')}` : 'Sync completed.';
+      }
 
       return `
-        <div class="sync-log-line">
+        <div class="sync-log-line ${eventClass}">
           <span class="sync-log-timestamp">[${timestamp}]</span>
           <span class="sync-log-message">${message}</span>
         </div>
@@ -784,14 +812,10 @@ const attachEventListeners = () => {
     if (state.syncState !== 'idle') {
       return;
     }
-    elements.syncStatusGeneral.textContent = 'Starting sync…';
-    elements.syncStatusVulnerabilities.textContent = '';
-    elements.syncStatusRemediations.textContent = '';
 
     try {
       await window.vanta.runSync();
     } catch (error) {
-      elements.syncStatusGeneral.textContent = `Sync failed: ${error.message}`;
       updateSyncButtons('idle');
     }
   });
@@ -802,9 +826,8 @@ const attachEventListeners = () => {
     }
     try {
       await window.vanta.pauseSync();
-      elements.syncStatusGeneral.textContent = 'Sync paused.';
     } catch (error) {
-      elements.syncStatusGeneral.textContent = `Failed to pause: ${error.message}`;
+      // Error is logged in sync history
     }
   });
 
@@ -814,9 +837,8 @@ const attachEventListeners = () => {
     }
     try {
       await window.vanta.resumeSync();
-      elements.syncStatusGeneral.textContent = 'Sync resumed…';
     } catch (error) {
-      elements.syncStatusGeneral.textContent = `Failed to resume: ${error.message}`;
+      // Error is logged in sync history
     }
   });
 
@@ -826,9 +848,8 @@ const attachEventListeners = () => {
     }
     try {
       await window.vanta.stopSync();
-      elements.syncStatusGeneral.textContent = 'Stopping sync…';
     } catch (error) {
-      elements.syncStatusGeneral.textContent = `Failed to stop: ${error.message}`;
+      // Error is logged in sync history
     }
   });
 
@@ -872,44 +893,22 @@ const attachEventListeners = () => {
   });
 
   window.vanta.onSyncProgress(({ type, count }) => {
-    // Update header status
-    if (type === 'vulnerabilities') {
-      elements.syncStatusVulnerabilities.textContent = `Vulnerabilities: ${formatNumber(count)} processed`;
-    } else if (type === 'remediations') {
-      elements.syncStatusRemediations.textContent = `Remediations: ${formatNumber(count)} processed`;
-    }
+    // Progress is now tracked in sync history
   });
 
   window.vanta.onSyncIncremental(async ({ type, stats, flushed }) => {
-    const label = type === 'vulnerabilities' ? 'Vulnerabilities' : 'Remediations';
-    elements.syncStatusGeneral.textContent = `Syncing ${label}: ${formatNumber(stats.total)} saved (${formatNumber(flushed)} flushed). Refreshing UI…`;
-
     // Refresh statistics and vulnerability list to show updated data
-    await Promise.all([loadStatistics(), loadVulnerabilities()]);
-
-    // Update status to show refresh is complete
-    elements.syncStatusGeneral.textContent = `Syncing ${label}: ${formatNumber(stats.total)} saved. UI refreshed.`;
+    await Promise.all([loadStatistics(), loadVulnerabilities(), loadSyncHistory()]);
   });
 
   window.vanta.onSyncCompleted(async () => {
-    elements.syncStatusGeneral.textContent = 'Sync complete! Refreshing data…';
     updateSyncButtons('idle');
-
     await Promise.all([loadStatistics(), loadVulnerabilities(), loadSyncHistory()]);
-
-    elements.syncStatusGeneral.textContent = 'Sync complete.';
-    setTimeout(() => {
-      elements.syncStatusGeneral.textContent = '';
-      elements.syncStatusVulnerabilities.textContent = '';
-      elements.syncStatusRemediations.textContent = '';
-    }, 3000);
   });
 
   window.vanta.onSyncError((payload) => {
-    elements.syncStatusGeneral.textContent = `Sync failed: ${payload?.message || 'Unknown error'}`;
-    elements.syncStatusVulnerabilities.textContent = '';
-    elements.syncStatusRemediations.textContent = '';
     updateSyncButtons('idle');
+    loadSyncHistory(); // Reload history to show error
   });
 };
 

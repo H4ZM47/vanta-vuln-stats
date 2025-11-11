@@ -100,6 +100,26 @@ class VulnerabilityDatabase {
           @new_count, @updated_count, @remediated_count
         )
       `),
+      insertSyncEvent: this.db.prepare(`
+        INSERT INTO sync_history (
+          sync_date,
+          event_type,
+          message,
+          details,
+          vulnerabilities_count, vulnerabilities_new, vulnerabilities_updated, vulnerabilities_remediated,
+          remediations_count, remediations_new, remediations_updated,
+          new_count, updated_count, remediated_count
+        )
+        VALUES (
+          @sync_date,
+          @event_type,
+          @message,
+          @details,
+          @vulnerabilities_count, @vulnerabilities_new, @vulnerabilities_updated, @vulnerabilities_remediated,
+          @remediations_count, @remediations_new, @remediations_updated,
+          @new_count, @updated_count, @remediated_count
+        )
+      `),
     };
   }
 
@@ -153,6 +173,9 @@ class VulnerabilityDatabase {
       CREATE TABLE IF NOT EXISTS sync_history (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         sync_date TEXT NOT NULL,
+        event_type TEXT,
+        message TEXT,
+        details TEXT,
         vulnerabilities_count INTEGER,
         vulnerabilities_new INTEGER,
         vulnerabilities_updated INTEGER,
@@ -200,6 +223,17 @@ class VulnerabilityDatabase {
         this.db.exec(`ALTER TABLE sync_history ADD COLUMN ${columnName} INTEGER`);
       }
     });
+
+    // Add new verbose logging columns
+    if (!columnNames.includes('event_type')) {
+      this.db.exec(`ALTER TABLE sync_history ADD COLUMN event_type TEXT`);
+    }
+    if (!columnNames.includes('message')) {
+      this.db.exec(`ALTER TABLE sync_history ADD COLUMN message TEXT`);
+    }
+    if (!columnNames.includes('details')) {
+      this.db.exec(`ALTER TABLE sync_history ADD COLUMN details TEXT`);
+    }
   }
 
   close() {
@@ -683,6 +717,9 @@ class VulnerabilityDatabase {
     const stmt = this.db.prepare(`
       SELECT
         sync_date,
+        event_type,
+        message,
+        details,
         vulnerabilities_count, vulnerabilities_new, vulnerabilities_updated, vulnerabilities_remediated,
         remediations_count, remediations_new, remediations_updated,
         new_count, updated_count, remediated_count
@@ -691,6 +728,38 @@ class VulnerabilityDatabase {
       LIMIT ?
     `);
     return stmt.all(finalLimit);
+  }
+
+  /**
+   * Log a sync event with detailed information
+   * @param {string} eventType - Type of event (start, batch, flush, error, pause, resume, stop, complete)
+   * @param {string} message - Human-readable message
+   * @param {object} options - Optional stats and details
+   */
+  logSyncEvent(eventType, message, options = {}) {
+    const now = dayjs().toISOString();
+    const {
+      vulnerabilityStats = {},
+      remediationStats = {},
+      details = null
+    } = options;
+
+    this.statements.insertSyncEvent.run({
+      sync_date: now,
+      event_type: eventType,
+      message: message,
+      details: details ? JSON.stringify(details) : null,
+      vulnerabilities_count: vulnerabilityStats.total ?? null,
+      vulnerabilities_new: vulnerabilityStats.new ?? null,
+      vulnerabilities_updated: vulnerabilityStats.updated ?? null,
+      vulnerabilities_remediated: vulnerabilityStats.remediated ?? null,
+      remediations_count: remediationStats.total ?? null,
+      remediations_new: remediationStats.new ?? null,
+      remediations_updated: remediationStats.updated ?? null,
+      new_count: vulnerabilityStats.new ?? null,
+      updated_count: vulnerabilityStats.updated ?? null,
+      remediated_count: vulnerabilityStats.remediated ?? null,
+    });
   }
 }
 

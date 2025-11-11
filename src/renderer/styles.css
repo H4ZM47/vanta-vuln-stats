@@ -213,6 +213,45 @@ button:disabled {
   flex: 1;
 }
 
+/* Event-specific styling */
+.sync-log-start .sync-log-message {
+  color: #38bdf8;
+  font-weight: 500;
+}
+
+.sync-log-batch .sync-log-message {
+  color: rgba(226, 232, 240, 0.8);
+}
+
+.sync-log-flush .sync-log-message {
+  color: rgba(125, 211, 252, 0.9);
+}
+
+.sync-log-complete .sync-log-message {
+  color: #4ade80;
+  font-weight: 500;
+}
+
+.sync-log-error .sync-log-message {
+  color: #f87171;
+  font-weight: 500;
+}
+
+.sync-log-pause .sync-log-message {
+  color: #fbbf24;
+  font-weight: 500;
+}
+
+.sync-log-resume .sync-log-message {
+  color: #38bdf8;
+  font-weight: 500;
+}
+
+.sync-log-stop .sync-log-message {
+  color: #fb923c;
+  font-weight: 500;
+}
+
 .sync-history-empty {
   text-align: center;
   padding: 2rem;

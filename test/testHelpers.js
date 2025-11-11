@@ -141,6 +141,26 @@ class FakeVulnerabilityDatabase {
     return [...this.syncHistory];
   }
 
+  logSyncEvent(eventType, message, options = {}) {
+    // Log verbose sync events for testing
+    this.syncHistory.push({
+      sync_date: new Date().toISOString(),
+      event_type: eventType,
+      message: message,
+      details: options.details ? JSON.stringify(options.details) : null,
+      vulnerabilities_count: options.vulnerabilityStats?.total ?? null,
+      vulnerabilities_new: options.vulnerabilityStats?.new ?? null,
+      vulnerabilities_updated: options.vulnerabilityStats?.updated ?? null,
+      vulnerabilities_remediated: options.vulnerabilityStats?.remediated ?? null,
+      remediations_count: options.remediationStats?.total ?? null,
+      remediations_new: options.remediationStats?.new ?? null,
+      remediations_updated: options.remediationStats?.updated ?? null,
+      new_count: options.vulnerabilityStats?.new ?? null,
+      updated_count: options.vulnerabilityStats?.updated ?? null,
+      remediated_count: options.vulnerabilityStats?.remediated ?? null,
+    });
+  }
+
   close() {}
 }
 

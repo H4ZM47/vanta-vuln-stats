@@ -127,6 +127,9 @@ class DataService {
     this.syncState.isPaused = false;
     stateCallback?.('running');
 
+    // Log sync start event
+    this.database.logSyncEvent('start', 'Sync operation started');
+
     try {
       const vulnerabilities = [];
       const remediations = [];
@@ -171,6 +174,20 @@ class DataService {
             flushed: stats.total,
           });
 
+          // Log database flush event
+          this.database.logSyncEvent(
+            'flush',
+            `Flushed ${stats.total} vulnerabilities to database`,
+            {
+              vulnerabilityStats: stats,
+              details: {
+                type: 'vulnerabilities',
+                batchSize: stats.total,
+                cumulativeStats: { ...vulnerabilitiesStats }
+              }
+            }
+          );
+
           vulnerabilities.length = 0;
         } catch (error) {
           throw new Error(`Failed to flush vulnerability buffer: ${error.message}`);
@@ -193,6 +210,20 @@ class DataService {
             flushed: stats.total,
           });
 
+          // Log database flush event
+          this.database.logSyncEvent(
+            'flush',
+            `Flushed ${stats.total} remediations to database`,
+            {
+              remediationStats: stats,
+              details: {
+                type: 'remediations',
+                batchSize: stats.total,
+                cumulativeStats: { ...remediationsStats }
+              }
+            }
+          );
+
           remediations.length = 0;
         } catch (error) {
           throw new Error(`Failed to flush remediation buffer: ${error.message}`);
@@ -208,6 +239,19 @@ class DataService {
             processedVulnerabilities += batch.length;
             progressCallback?.({ type: 'vulnerabilities', count: processedVulnerabilities });
 
+            // Log API batch fetch
+            this.database.logSyncEvent(
+              'batch',
+              `Fetched ${batch.length} vulnerabilities from API (total: ${processedVulnerabilities})`,
+              {
+                details: {
+                  type: 'vulnerabilities',
+                  batchSize: batch.length,
+                  totalProcessed: processedVulnerabilities
+                }
+              }
+            );
+
             // Flush to database when buffer reaches batch size
             if (vulnerabilities.length >= this.batchSize) {
               flushVulnerabilityBuffer();
@@ -221,6 +265,19 @@ class DataService {
             remediations.push(...batch);
             processedRemediations += batch.length;
             progressCallback?.({ type: 'remediations', count: processedRemediations });
+
+            // Log API batch fetch
+            this.database.logSyncEvent(
+              'batch',
+              `Fetched ${batch.length} remediations from API (total: ${processedRemediations})`,
+              {
+                details: {
+                  type: 'remediations',
+                  batchSize: batch.length,
+                  totalProcessed: processedRemediations
+                }
+              }
+            );
 
             // Flush to database when buffer reaches batch size
             if (remediations.length >= this.batchSize) {
@@ -243,11 +300,37 @@ class DataService {
       // Record combined sync history
       this.database.recordSyncHistory(vulnerabilitiesStats, remediationsStats);
 
+      // Log sync completion event
+      this.database.logSyncEvent(
+        'complete',
+        'Sync operation completed successfully',
+        {
+          vulnerabilityStats: vulnerabilitiesStats,
+          remediationStats: remediationsStats,
+          details: {
+            totalVulnerabilities: processedVulnerabilities,
+            totalRemediations: processedRemediations
+          }
+        }
+      );
+
       return {
         vulnerabilities: vulnerabilitiesStats,
         remediations: remediationsStats,
       };
     } catch (error) {
+      // Log error event
+      this.database.logSyncEvent(
+        'error',
+        `Sync operation failed: ${error.message}`,
+        {
+          details: {
+            errorMessage: error.message,
+            errorStack: error.stack
+          }
+        }
+      );
+
       if (error.message === 'Sync stopped by user') {
         stateCallback?.('idle');
         throw error;
@@ -269,6 +352,10 @@ class DataService {
     }
     this.syncState.isPaused = true;
     this.syncState.state = 'paused';
+
+    // Log pause event
+    this.database.logSyncEvent('pause', 'Sync operation paused by user');
+
     return { success: true };
   }
 
@@ -282,6 +369,10 @@ class DataService {
       this.syncState.pausePromiseResolve();
       this.syncState.pausePromiseResolve = null;
     }
+
+    // Log resume event
+    this.database.logSyncEvent('resume', 'Sync operation resumed by user');
+
     return { success: true };
   }
 
@@ -290,6 +381,9 @@ class DataService {
       throw new Error('No active sync to stop.');
     }
     this.syncState.state = 'stopping';
+
+    // Log stop event
+    this.database.logSyncEvent('stop', 'Sync operation stopped by user');
 
     // If paused, resolve the pause promise first
     if (this.syncState.pausePromiseResolve) {
