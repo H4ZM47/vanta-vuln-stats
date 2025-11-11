@@ -39,7 +39,7 @@ class DataService {
     return merged;
   }
 
-  async syncData(progressCallback, stateCallback) {
+  async syncData(progressCallback, onIncrementalUpdate, stateCallback) {
     if (this.activeSync) {
       throw new Error('A sync is already in progress.');
     }
@@ -67,6 +67,10 @@ class DataService {
     try {
       const vulnerabilities = [];
       const remediations = [];
+      const BATCH_SIZE = 1000;
+
+      let vulnerabilitiesStats = { new: 0, updated: 0, remediated: 0, total: 0 };
+      let remediationsStats = { new: 0, updated: 0, total: 0 };
 
       // Helper to check for pause/stop
       const checkPauseOrStop = async () => {
@@ -93,6 +97,24 @@ class DataService {
             await checkPauseOrStop();
             vulnerabilities.push(...batch);
             progressCallback?.({ type: 'vulnerabilities', count: vulnerabilities.length });
+
+            // Flush to database every 1000 records
+            if (vulnerabilities.length >= BATCH_SIZE) {
+              const stats = this.database.storeVulnerabilitiesBatch(vulnerabilities);
+              vulnerabilitiesStats.new += stats.new;
+              vulnerabilitiesStats.updated += stats.updated;
+              vulnerabilitiesStats.remediated += stats.remediated;
+              vulnerabilitiesStats.total += stats.total;
+
+              // Notify about incremental update
+              onIncrementalUpdate?.({
+                type: 'vulnerabilities',
+                stats: { ...vulnerabilitiesStats },
+                flushed: vulnerabilities.length,
+              });
+
+              vulnerabilities.length = 0; // Clear the buffer
+            }
           },
           signal: this.syncState.abortController.signal,
         }),
@@ -101,17 +123,57 @@ class DataService {
             await checkPauseOrStop();
             remediations.push(...batch);
             progressCallback?.({ type: 'remediations', count: remediations.length });
+
+            // Flush to database every 1000 records
+            if (remediations.length >= BATCH_SIZE) {
+              const stats = this.database.storeRemediationsBatch(remediations);
+              remediationsStats.new += stats.new;
+              remediationsStats.updated += stats.updated;
+              remediationsStats.total += stats.total;
+
+              // Notify about incremental update
+              onIncrementalUpdate?.({
+                type: 'remediations',
+                stats: { ...remediationsStats },
+                flushed: remediations.length,
+              });
+
+              remediations.length = 0; // Clear the buffer
+            }
           },
           signal: this.syncState.abortController.signal,
         }),
       ]);
 
-      const vulnerabilityStats = this.database.storeVulnerabilities(vulnerabilities);
-      const remediationStats = this.database.storeRemediations(remediations);
+      // Store any remaining records
+      if (vulnerabilities.length > 0) {
+        const stats = this.database.storeVulnerabilitiesBatch(vulnerabilities);
+        vulnerabilitiesStats.new += stats.new;
+        vulnerabilitiesStats.updated += stats.updated;
+        vulnerabilitiesStats.remediated += stats.remediated;
+        vulnerabilitiesStats.total += stats.total;
+      }
+
+      if (remediations.length > 0) {
+        const stats = this.database.storeRemediationsBatch(remediations);
+        remediationsStats.new += stats.new;
+        remediationsStats.updated += stats.updated;
+        remediationsStats.total += stats.total;
+      }
+
+      // Record final sync history
+      const now = require('dayjs')().toISOString();
+      this.database.statements.insertSync.run({
+        sync_date: now,
+        vulnerabilities_count: vulnerabilitiesStats.total,
+        new_count: vulnerabilitiesStats.new,
+        updated_count: vulnerabilitiesStats.updated,
+        remediated_count: vulnerabilitiesStats.remediated,
+      });
 
       return {
-        vulnerabilities: vulnerabilityStats,
-        remediations: remediationStats,
+        vulnerabilities: vulnerabilitiesStats,
+        remediations: remediationsStats,
       };
     } catch (error) {
       if (error.message === 'Sync stopped by user') {

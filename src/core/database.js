@@ -257,7 +257,74 @@ class VulnerabilityDatabase {
     return tx(vulnerabilities);
   }
 
+  storeVulnerabilitiesBatch(vulnerabilities) {
+    const tx = this.db.transaction((rows) => {
+      let newCount = 0;
+      let updatedCount = 0;
+      let remediatedCount = 0;
+      const now = dayjs().toISOString();
+
+      rows.forEach((row) => {
+        if (!row?.id) {
+          return;
+        }
+        const payload = this._normaliseVulnerability(row);
+        payload.updated_at = now;
+
+        const existing = this.statements.selectVulnerabilityRaw.get(row.id);
+        if (!existing) {
+          newCount += 1;
+        } else if (existing.raw_data !== payload.raw_data) {
+          updatedCount += 1;
+          const existingJson = JSON.parse(existing.raw_data);
+          const wasActive = !(existingJson?.deactivateMetadata?.deactivatedOnDate);
+          const isNowDeactivated = Boolean(row?.deactivateMetadata?.deactivatedOnDate);
+          if (wasActive && isNowDeactivated) {
+            remediatedCount += 1;
+          }
+        }
+
+        if (!existing && row?.deactivateMetadata?.deactivatedOnDate) {
+          remediatedCount += 1;
+        }
+
+        this.statements.upsertVulnerability.run(payload);
+      });
+
+      return { new: newCount, updated: updatedCount, remediated: remediatedCount, total: rows.length };
+    });
+
+    return tx(vulnerabilities);
+  }
+
   storeRemediations(remediations) {
+    const tx = this.db.transaction((rows) => {
+      let newCount = 0;
+      let updatedCount = 0;
+      const now = dayjs().toISOString();
+
+      rows.forEach((row) => {
+        if (!row?.id) {
+          return;
+        }
+        const payload = this._normaliseRemediation(row);
+        payload.updated_at = now;
+        const existing = this.statements.selectRemediationRaw.get(row.id);
+        if (!existing) {
+          newCount += 1;
+        } else if (existing.raw_data !== payload.raw_data) {
+          updatedCount += 1;
+        }
+        this.statements.upsertRemediation.run(payload);
+      });
+
+      return { new: newCount, updated: updatedCount, total: rows.length };
+    });
+
+    return tx(remediations);
+  }
+
+  storeRemediationsBatch(remediations) {
     const tx = this.db.transaction((rows) => {
       let newCount = 0;
       let updatedCount = 0;

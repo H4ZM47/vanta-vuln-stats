@@ -23,5 +23,6 @@ contextBridge.exposeInMainWorld('vanta', {
   onSyncProgress: createSubscription('sync:progress'),
   onSyncCompleted: createSubscription('sync:completed'),
   onSyncError: createSubscription('sync:error'),
+  onSyncIncremental: createSubscription('sync:incremental'),
   onSyncState: createSubscription('sync:state'),
 });

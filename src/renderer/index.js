@@ -433,6 +433,17 @@ const attachEventListeners = () => {
     elements.syncStatus.textContent = `Syncing ${label}: ${formatNumber(count)} records processed…`;
   });
 
+  window.vanta.onSyncIncremental(async ({ type, stats, flushed }) => {
+    const label = type === 'vulnerabilities' ? 'Vulnerabilities' : 'Remediations';
+    elements.syncStatus.textContent = `Syncing ${label}: ${formatNumber(stats.total)} saved (${formatNumber(flushed)} flushed). Refreshing UI…`;
+
+    // Refresh statistics and vulnerability list to show updated data
+    await Promise.all([loadStatistics(), loadVulnerabilities()]);
+
+    // Update status to show refresh is complete
+    elements.syncStatus.textContent = `Syncing ${label}: ${formatNumber(stats.total)} saved. UI refreshed.`;
+  });
+
   window.vanta.onSyncCompleted(async () => {
     elements.syncStatus.textContent = 'Sync complete! Refreshing data…';
     updateSyncButtons('idle');
