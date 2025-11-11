@@ -16,7 +16,12 @@ contextBridge.exposeInMainWorld('vanta', {
   getSyncHistory: () => ipcRenderer.invoke('sync:history'),
   getDatabasePath: () => ipcRenderer.invoke('database:path'),
   runSync: () => ipcRenderer.invoke('sync:run'),
+  pauseSync: () => ipcRenderer.invoke('sync:pause'),
+  resumeSync: () => ipcRenderer.invoke('sync:resume'),
+  stopSync: () => ipcRenderer.invoke('sync:stop'),
+  getSyncState: () => ipcRenderer.invoke('sync:state'),
   onSyncProgress: createSubscription('sync:progress'),
   onSyncCompleted: createSubscription('sync:completed'),
   onSyncError: createSubscription('sync:error'),
+  onSyncState: createSubscription('sync:state'),
 });
