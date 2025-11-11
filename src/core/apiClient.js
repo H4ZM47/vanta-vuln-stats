@@ -112,8 +112,10 @@ class VantaApiClient {
 
       results.push(...pageData);
 
+      // Reduced delay between pages from 500ms to 100ms for faster sync
+      // while still being respectful to the API
       if (pageCursor) {
-        await sleep(500);
+        await sleep(100);
       }
     } while (pageCursor);
 
