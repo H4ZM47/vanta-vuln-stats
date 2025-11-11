@@ -9,9 +9,12 @@ const elements = {
   pauseSyncButton: document.getElementById('pauseSyncButton'),
   resumeSyncButton: document.getElementById('resumeSyncButton'),
   stopSyncButton: document.getElementById('stopSyncButton'),
-  syncStatus: document.getElementById('syncStatus'),
+  syncStatusVulnerabilities: document.getElementById('syncStatusVulnerabilities'),
+  syncStatusRemediations: document.getElementById('syncStatusRemediations'),
+  syncStatusGeneral: document.getElementById('syncStatusGeneral'),
   statistics: document.getElementById('statistics'),
-  syncHistoryBody: document.getElementById('syncHistoryBody'),
+  syncHistoryLog: document.getElementById('syncHistoryLog'),
+  syncHistoryEmpty: document.getElementById('syncHistoryEmpty'),
   filtersForm: document.getElementById('filters'),
   severity: document.getElementById('severity'),
   status: document.getElementById('status'),
@@ -54,6 +57,10 @@ const state = {
   vulnerabilities: [],
   selectedId: null,
   syncState: 'idle', // idle, running, paused, stopping
+  currentSync: {
+    vulnerabilities: { count: 0, status: 'idle' }, // idle, syncing, completed
+    remediations: { count: 0, status: 'idle' },
+  },
 };
 
 const toISODate = (value) => {
@@ -171,21 +178,128 @@ const renderStatistics = (stats) => {
 
 const renderSyncHistory = (history) => {
   if (!history?.length) {
-    elements.syncHistoryBody.innerHTML = '<tr><td colspan="5">No syncs have been recorded.</td></tr>';
+    elements.syncHistoryLog.style.display = 'none';
+    elements.syncHistoryEmpty.style.display = 'block';
     return;
   }
 
-  elements.syncHistoryBody.innerHTML = history
-    .map((item) => `
-      <tr>
-        <td>${formatDateTime(item.sync_date)}</td>
-        <td>${formatNumber(item.vulnerabilities_count)}</td>
-        <td>${formatNumber(item.new_count)}</td>
-        <td>${formatNumber(item.updated_count)}</td>
-        <td>${formatNumber(item.remediated_count)}</td>
-      </tr>
-    `)
+  elements.syncHistoryLog.style.display = 'flex';
+  elements.syncHistoryEmpty.style.display = 'none';
+
+  elements.syncHistoryLog.innerHTML = history
+    .map((item) => {
+      const hasVulnData = item.vulnerabilities_count !== undefined && item.vulnerabilities_count !== null;
+      const hasRemData = item.remediations_count !== undefined && item.remediations_count !== null;
+
+      const vulnStats = hasVulnData ? `
+        <div class="sync-history-stat">
+          <span class="sync-history-stat-label">Total:</span>
+          <span class="sync-history-stat-value">${formatNumber(item.vulnerabilities_count)}</span>
+        </div>
+        <div class="sync-history-stat">
+          <span class="sync-history-stat-label">New:</span>
+          <span class="sync-history-stat-value">${formatNumber(item.vulnerabilities_new || 0)}</span>
+        </div>
+        <div class="sync-history-stat">
+          <span class="sync-history-stat-label">Updated:</span>
+          <span class="sync-history-stat-value">${formatNumber(item.vulnerabilities_updated || 0)}</span>
+        </div>
+        <div class="sync-history-stat">
+          <span class="sync-history-stat-label">Remediated:</span>
+          <span class="sync-history-stat-value">${formatNumber(item.vulnerabilities_remediated || 0)}</span>
+        </div>
+      ` : '';
+
+      const remStats = hasRemData ? `
+        <div class="sync-history-stat">
+          <span class="sync-history-stat-label">Total:</span>
+          <span class="sync-history-stat-value">${formatNumber(item.remediations_count)}</span>
+        </div>
+        <div class="sync-history-stat">
+          <span class="sync-history-stat-label">New:</span>
+          <span class="sync-history-stat-value">${formatNumber(item.remediations_new || 0)}</span>
+        </div>
+        <div class="sync-history-stat">
+          <span class="sync-history-stat-label">Updated:</span>
+          <span class="sync-history-stat-value">${formatNumber(item.remediations_updated || 0)}</span>
+        </div>
+      ` : '';
+
+      return `
+        <div class="sync-history-item completed">
+          <div class="sync-history-header">
+            <div class="sync-history-title">Sync Completed</div>
+            <div class="sync-history-time">${formatDateTime(item.sync_date)}</div>
+          </div>
+          ${hasVulnData ? `
+            <div style="margin-bottom: 0.5rem; font-weight: 600; color: rgba(148, 163, 184, 0.9); font-size: 0.85rem;">
+              Vulnerabilities
+            </div>
+            <div class="sync-history-stats">
+              ${vulnStats}
+            </div>
+          ` : ''}
+          ${hasRemData ? `
+            <div style="margin-top: 0.75rem; margin-bottom: 0.5rem; font-weight: 600; color: rgba(148, 163, 184, 0.9); font-size: 0.85rem;">
+              Remediations
+            </div>
+            <div class="sync-history-stats">
+              ${remStats}
+            </div>
+          ` : ''}
+        </div>
+      `;
+    })
     .join('');
+};
+
+const addLiveSyncItem = () => {
+  elements.syncHistoryLog.style.display = 'flex';
+  elements.syncHistoryEmpty.style.display = 'none';
+
+  const liveItem = document.createElement('div');
+  liveItem.className = 'sync-history-item in-progress';
+  liveItem.id = 'live-sync-item';
+  liveItem.innerHTML = `
+    <div class="sync-history-header">
+      <div class="sync-history-title">Sync In Progress</div>
+      <div class="sync-history-time">Now</div>
+    </div>
+    <div style="margin-bottom: 0.5rem; font-weight: 600; color: rgba(148, 163, 184, 0.9); font-size: 0.85rem;">
+      Vulnerabilities
+    </div>
+    <div class="sync-history-stats" id="live-vuln-stats">
+      <div class="sync-history-stat">
+        <span class="sync-history-stat-label">Processing:</span>
+        <span class="sync-history-stat-value" id="live-vuln-count">0</span>
+      </div>
+    </div>
+    <div style="margin-top: 0.75rem; margin-bottom: 0.5rem; font-weight: 600; color: rgba(148, 163, 184, 0.9); font-size: 0.85rem;">
+      Remediations
+    </div>
+    <div class="sync-history-stats" id="live-rem-stats">
+      <div class="sync-history-stat">
+        <span class="sync-history-stat-label">Processing:</span>
+        <span class="sync-history-stat-value" id="live-rem-count">0</span>
+      </div>
+    </div>
+  `;
+
+  elements.syncHistoryLog.insertBefore(liveItem, elements.syncHistoryLog.firstChild);
+};
+
+const updateLiveSyncItem = (type, count) => {
+  const countElement = document.getElementById(type === 'vulnerabilities' ? 'live-vuln-count' : 'live-rem-count');
+  if (countElement) {
+    countElement.textContent = formatNumber(count);
+  }
+};
+
+const removeLiveSyncItem = () => {
+  const liveItem = document.getElementById('live-sync-item');
+  if (liveItem) {
+    liveItem.remove();
+  }
 };
 
 const renderVulnerabilities = () => {
@@ -349,12 +463,22 @@ const attachEventListeners = () => {
     if (state.syncState !== 'idle') {
       return;
     }
-    elements.syncStatus.textContent = 'Starting sync…';
+    state.currentSync = {
+      vulnerabilities: { count: 0, status: 'syncing' },
+      remediations: { count: 0, status: 'syncing' },
+    };
+    elements.syncStatusGeneral.textContent = 'Starting sync…';
+    elements.syncStatusVulnerabilities.textContent = '';
+    elements.syncStatusRemediations.textContent = '';
+
+    addLiveSyncItem();
+
     try {
       await window.vanta.runSync();
     } catch (error) {
-      elements.syncStatus.textContent = `Sync failed: ${error.message}`;
+      elements.syncStatusGeneral.textContent = `Sync failed: ${error.message}`;
       updateSyncButtons('idle');
+      removeLiveSyncItem();
     }
   });
 
@@ -364,9 +488,9 @@ const attachEventListeners = () => {
     }
     try {
       await window.vanta.pauseSync();
-      elements.syncStatus.textContent = 'Sync paused.';
+      elements.syncStatusGeneral.textContent = 'Sync paused.';
     } catch (error) {
-      elements.syncStatus.textContent = `Failed to pause: ${error.message}`;
+      elements.syncStatusGeneral.textContent = `Failed to pause: ${error.message}`;
     }
   });
 
@@ -376,9 +500,9 @@ const attachEventListeners = () => {
     }
     try {
       await window.vanta.resumeSync();
-      elements.syncStatus.textContent = 'Sync resumed…';
+      elements.syncStatusGeneral.textContent = 'Sync resumed…';
     } catch (error) {
-      elements.syncStatus.textContent = `Failed to resume: ${error.message}`;
+      elements.syncStatusGeneral.textContent = `Failed to resume: ${error.message}`;
     }
   });
 
@@ -388,9 +512,9 @@ const attachEventListeners = () => {
     }
     try {
       await window.vanta.stopSync();
-      elements.syncStatus.textContent = 'Stopping sync…';
+      elements.syncStatusGeneral.textContent = 'Stopping sync…';
     } catch (error) {
-      elements.syncStatus.textContent = `Failed to stop: ${error.message}`;
+      elements.syncStatusGeneral.textContent = `Failed to stop: ${error.message}`;
     }
   });
 
@@ -429,34 +553,55 @@ const attachEventListeners = () => {
   });
 
   window.vanta.onSyncProgress(({ type, count }) => {
-    const label = type === 'vulnerabilities' ? 'Vulnerabilities' : 'Remediations';
-    elements.syncStatus.textContent = `Syncing ${label}: ${formatNumber(count)} records processed…`;
+    state.currentSync[type].count = count;
+    state.currentSync[type].status = 'syncing';
+
+    // Update header status
+    if (type === 'vulnerabilities') {
+      elements.syncStatusVulnerabilities.textContent = `Vulnerabilities: ${formatNumber(count)} processed`;
+    } else if (type === 'remediations') {
+      elements.syncStatusRemediations.textContent = `Remediations: ${formatNumber(count)} processed`;
+    }
+
+    // Update live sync item in history log
+    updateLiveSyncItem(type, count);
   });
 
   window.vanta.onSyncIncremental(async ({ type, stats, flushed }) => {
     const label = type === 'vulnerabilities' ? 'Vulnerabilities' : 'Remediations';
-    elements.syncStatus.textContent = `Syncing ${label}: ${formatNumber(stats.total)} saved (${formatNumber(flushed)} flushed). Refreshing UI…`;
+    elements.syncStatusGeneral.textContent = `Syncing ${label}: ${formatNumber(stats.total)} saved (${formatNumber(flushed)} flushed). Refreshing UI…`;
 
     // Refresh statistics and vulnerability list to show updated data
     await Promise.all([loadStatistics(), loadVulnerabilities()]);
 
     // Update status to show refresh is complete
-    elements.syncStatus.textContent = `Syncing ${label}: ${formatNumber(stats.total)} saved. UI refreshed.`;
+    elements.syncStatusGeneral.textContent = `Syncing ${label}: ${formatNumber(stats.total)} saved. UI refreshed.`;
   });
 
   window.vanta.onSyncCompleted(async () => {
-    elements.syncStatus.textContent = 'Sync complete! Refreshing data…';
+    elements.syncStatusGeneral.textContent = 'Sync complete! Refreshing data…';
+    state.currentSync.vulnerabilities.status = 'completed';
+    state.currentSync.remediations.status = 'completed';
     updateSyncButtons('idle');
+
+    removeLiveSyncItem();
+
     await Promise.all([loadStatistics(), loadVulnerabilities(), loadSyncHistory()]);
-    elements.syncStatus.textContent = 'Sync complete.';
+
+    elements.syncStatusGeneral.textContent = 'Sync complete.';
     setTimeout(() => {
-      elements.syncStatus.textContent = '';
+      elements.syncStatusGeneral.textContent = '';
+      elements.syncStatusVulnerabilities.textContent = '';
+      elements.syncStatusRemediations.textContent = '';
     }, 3000);
   });
 
   window.vanta.onSyncError((payload) => {
-    elements.syncStatus.textContent = `Sync failed: ${payload?.message || 'Unknown error'}`;
+    elements.syncStatusGeneral.textContent = `Sync failed: ${payload?.message || 'Unknown error'}`;
+    elements.syncStatusVulnerabilities.textContent = '';
+    elements.syncStatusRemediations.textContent = '';
     updateSyncButtons('idle');
+    removeLiveSyncItem();
   });
 };
 
@@ -473,5 +618,5 @@ const initialize = async () => {
 
 initialize().catch((error) => {
   console.error('Failed to initialize renderer', error);
-  elements.syncStatus.textContent = 'Failed to initialize application. Check console for details.';
+  elements.syncStatusGeneral.textContent = 'Failed to initialize application. Check console for details.';
 });
