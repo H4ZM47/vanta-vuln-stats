@@ -58,19 +58,21 @@ class DataService {
       const vulnerabilities = [];
       const remediations = [];
 
-      await apiClient.getVulnerabilities({
-        onBatch: async (batch) => {
-          vulnerabilities.push(...batch);
-          progressCallback?.({ type: 'vulnerabilities', count: vulnerabilities.length });
-        },
-      });
-
-      await apiClient.getRemediations({
-        onBatch: async (batch) => {
-          remediations.push(...batch);
-          progressCallback?.({ type: 'remediations', count: remediations.length });
-        },
-      });
+      // Fetch vulnerabilities and remediations in parallel for faster sync
+      await Promise.all([
+        apiClient.getVulnerabilities({
+          onBatch: async (batch) => {
+            vulnerabilities.push(...batch);
+            progressCallback?.({ type: 'vulnerabilities', count: vulnerabilities.length });
+          },
+        }),
+        apiClient.getRemediations({
+          onBatch: async (batch) => {
+            remediations.push(...batch);
+            progressCallback?.({ type: 'remediations', count: remediations.length });
+          },
+        }),
+      ]);
 
       const vulnerabilityStats = this.database.storeVulnerabilities(vulnerabilities);
       const remediationStats = this.database.storeRemediations(remediations);

@@ -15,7 +15,14 @@ class VulnerabilityDatabase {
     this.databasePath = databasePath;
     ensureDirectory(databasePath);
     this.db = new Database(databasePath);
+
+    // Performance optimizations for faster sync operations
     this.db.pragma('journal_mode = WAL');
+    this.db.pragma('synchronous = NORMAL'); // Reduce fsync calls for better performance
+    this.db.pragma('cache_size = -64000'); // 64MB cache (negative means KB)
+    this.db.pragma('temp_store = MEMORY'); // Store temp tables in memory
+    this.db.pragma('mmap_size = 268435456'); // 256MB memory-mapped I/O
+
     this._createTables();
     this.statements = {
       selectVulnerabilityRaw: this.db.prepare('SELECT raw_data FROM vulnerabilities WHERE id = ?'),
