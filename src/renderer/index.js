@@ -120,17 +120,13 @@ const switchTab = (tabName) => {
     }
   });
 
-  // Update tab content
+  // Update tab content - rely on CSS classes, not inline styles
   if (tabName === 'vulnerabilities') {
     elements.vulnerabilitiesTab.classList.add('active');
-    elements.vulnerabilitiesTab.style.display = 'block';
     elements.settingsTab.classList.remove('active');
-    elements.settingsTab.style.display = 'none';
   } else if (tabName === 'settings') {
     elements.settingsTab.classList.add('active');
-    elements.settingsTab.style.display = 'block';
     elements.vulnerabilitiesTab.classList.remove('active');
-    elements.vulnerabilitiesTab.style.display = 'none';
   }
 };
 
@@ -528,28 +524,41 @@ const generateCSVReport = (vulnerabilities, remediationsMap, includeRemediations
   return rows.join('\n');
 };
 
+const escapeHTML = (value) => {
+  if (value == null) return '—';
+  return String(value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+};
+
 const generateHTMLReport = (vulnerabilities, remediationsMap, includeRemediations) => {
-  const timestamp = new Date().toLocaleString();
+  const timestamp = escapeHTML(new Date().toLocaleString());
   const rows = vulnerabilities
     .map((vuln) => {
       const rems = remediationsMap[vuln.id] || [];
       const remediationInfo = includeRemediations
-        ? `<td>${rems.length}</td><td>${rems.length > 0 ? formatDate(rems[0].remediationDate || rems[0].detectedDate) : '—'}</td>`
+        ? `<td>${escapeHTML(rems.length)}</td><td>${rems.length > 0 ? escapeHTML(formatDate(rems[0].remediationDate || rems[0].detectedDate)) : '—'}</td>`
         : '';
+
+      // Note: severity class is safe as it's validated against known values
+      const severityClass = ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW'].includes(vuln.severity) ? vuln.severity : 'UNKNOWN';
 
       return `
         <tr>
-          <td>${vuln.id}</td>
-          <td>${vuln.name || '—'}</td>
-          <td class="severity-${vuln.severity}">${vuln.severity || 'UNKNOWN'}</td>
-          <td>${vuln.cvss_score || '—'}</td>
-          <td>${vuln.deactivated_on ? 'Remediated' : 'Active'}</td>
-          <td>${vuln.fixable ? 'Yes' : 'No'}</td>
-          <td>${vuln.integration_id || '—'}</td>
-          <td>${vuln.target_id || '—'}</td>
-          <td>${formatDate(vuln.first_detected)}</td>
-          <td>${formatDate(vuln.deactivated_on)}</td>
-          <td>${vuln.cve || '—'}</td>
+          <td>${escapeHTML(vuln.id)}</td>
+          <td>${escapeHTML(vuln.name)}</td>
+          <td class="severity-${severityClass}">${escapeHTML(vuln.severity || 'UNKNOWN')}</td>
+          <td>${escapeHTML(vuln.cvss_score)}</td>
+          <td>${escapeHTML(vuln.deactivated_on ? 'Remediated' : 'Active')}</td>
+          <td>${escapeHTML(vuln.fixable ? 'Yes' : 'No')}</td>
+          <td>${escapeHTML(vuln.integration_id)}</td>
+          <td>${escapeHTML(vuln.target_id)}</td>
+          <td>${escapeHTML(formatDate(vuln.first_detected))}</td>
+          <td>${escapeHTML(formatDate(vuln.deactivated_on))}</td>
+          <td>${escapeHTML(vuln.cve)}</td>
           ${remediationInfo}
         </tr>
       `;
@@ -630,7 +639,7 @@ const generateHTMLReport = (vulnerabilities, remediationsMap, includeRemediation
   <h1>Vanta Vulnerability Report</h1>
   <div class="meta">
     Generated on ${timestamp}<br>
-    Total vulnerabilities: ${vulnerabilities.length}
+    Total vulnerabilities: ${escapeHTML(vulnerabilities.length)}
   </div>
   <table>
     <thead>
@@ -677,27 +686,43 @@ const attachEventListeners = () => {
       const includeRemediations = elements.includeRemediations.value === 'yes';
       const useFilters = elements.applyFilters.value === 'yes';
 
-      // Get all vulnerabilities (or filtered ones)
+      // Get all vulnerabilities (or filtered ones) by fetching all pages
       const filters = useFilters ? state.filters : defaultFilters();
-      const response = await window.vanta.listVulnerabilities({
-        filters,
-        limit: 10000, // Large limit to get all data
-        offset: 0,
-        sortColumn: state.sortColumn,
-        sortDirection: state.sortDirection,
-      });
+      const vulnerabilities = [];
+      const pageSize = 1000; // Fetch in batches of 1000
+      let offset = 0;
+      let hasMore = true;
 
-      const vulnerabilities = response.data;
+      while (hasMore) {
+        elements.reportStatus.textContent = `Generating report... (fetching vulnerabilities: ${vulnerabilities.length})`;
+        const response = await window.vanta.listVulnerabilities({
+          filters,
+          limit: pageSize,
+          offset,
+          sortColumn: state.sortColumn,
+          sortDirection: state.sortDirection,
+        });
 
-      // Get remediations if requested
+        vulnerabilities.push(...response.data);
+        offset += pageSize;
+        hasMore = response.data.length === pageSize && vulnerabilities.length < response.total;
+      }
+
+      // Get remediations if requested, batched to avoid overwhelming IPC
       let remediationsMap = {};
       if (includeRemediations) {
-        elements.reportStatus.textContent = 'Generating report... (fetching remediations)';
-        const remediationPromises = vulnerabilities.map((vuln) =>
-          window.vanta.getRemediations(vuln.id).then((rems) => ({ id: vuln.id, remediations: rems }))
-        );
-        const remediationResults = await Promise.all(remediationPromises);
-        remediationsMap = Object.fromEntries(remediationResults.map((r) => [r.id, r.remediations]));
+        const batchSize = 50;
+        for (let i = 0; i < vulnerabilities.length; i += batchSize) {
+          elements.reportStatus.textContent = `Generating report... (fetching remediations: ${i}/${vulnerabilities.length})`;
+          const batch = vulnerabilities.slice(i, i + batchSize);
+          const remediationPromises = batch.map((vuln) =>
+            window.vanta.getRemediations(vuln.id).then((rems) => ({ id: vuln.id, remediations: rems }))
+          );
+          const remediationResults = await Promise.all(remediationPromises);
+          remediationResults.forEach((r) => {
+            remediationsMap[r.id] = r.remediations;
+          });
+        }
       }
 
       // Generate report based on format
