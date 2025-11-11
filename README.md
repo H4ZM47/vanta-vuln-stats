@@ -23,10 +23,16 @@ The app replaces the legacy Python CLI/Qt tooling with a modern JavaScript stack
 
 ### Installation
 
-1. Install dependencies:
+1. Install dependencies (this will also rebuild native modules for the bundled Electron runtime):
 
    ```bash
    npm install
+   ```
+
+   If you ever encounter native module version errors (for example with `better-sqlite3`) you can manually rerun the rebuild step:
+
+   ```bash
+   npm run postinstall
    ```
 
 2. Launch the Electron application in development mode:

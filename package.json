@@ -6,6 +6,7 @@
   "scripts": {
     "start": "electron .",
     "lint": "echo 'No linting configured'",
+    "postinstall": "electron-builder install-app-deps",
     "pack": "electron-builder --dir",
     "dist": "electron-builder"
   },
