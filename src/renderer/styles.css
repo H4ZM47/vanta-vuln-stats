@@ -129,69 +129,33 @@ button:disabled {
 .sync-history-log {
   display: flex;
   flex-direction: column;
-  gap: 0.75rem;
+  gap: 0.5rem;
   max-height: 400px;
-  overflow-y: auto;
-}
-
-.sync-history-item {
   padding: 0.75rem;
+  background: rgba(15, 23, 42, 0.7);
+  border: 1px solid rgba(148, 163, 184, 0.2);
   border-radius: 8px;
-  background: rgba(30, 41, 59, 0.5);
-  border: 1px solid rgba(148, 163, 184, 0.1);
-}
-
-.sync-history-item.in-progress {
-  border-left: 3px solid #3b82f6;
-  background: rgba(59, 130, 246, 0.1);
-}
-
-.sync-history-item.completed {
-  border-left: 3px solid #10b981;
-}
-
-.sync-history-item.failed {
-  border-left: 3px solid #ef4444;
-}
-
-.sync-history-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 0.5rem;
-}
-
-.sync-history-title {
-  font-weight: 600;
-  color: rgba(226, 232, 240, 0.95);
-  font-size: 0.9rem;
-}
-
-.sync-history-time {
-  color: rgba(148, 163, 184, 0.7);
+  overflow-y: auto;
+  font-family: 'SFMono-Regular', 'Roboto Mono', Menlo, Consolas, monospace;
   font-size: 0.85rem;
+  line-height: 1.4;
 }
 
-.sync-history-stats {
+.sync-log-line {
   display: flex;
-  gap: 1rem;
-  font-size: 0.85rem;
+  gap: 0.75rem;
+  align-items: flex-start;
+  white-space: pre-wrap;
+}
+
+.sync-log-timestamp {
   color: rgba(148, 163, 184, 0.8);
+  flex-shrink: 0;
 }
 
-.sync-history-stat {
-  display: flex;
-  align-items: center;
-  gap: 0.25rem;
-}
-
-.sync-history-stat-label {
-  color: rgba(148, 163, 184, 0.6);
-}
-
-.sync-history-stat-value {
-  color: rgba(226, 232, 240, 0.9);
-  font-weight: 500;
+.sync-log-message {
+  color: rgba(226, 232, 240, 0.95);
+  flex: 1;
 }
 
 .sync-history-empty {
