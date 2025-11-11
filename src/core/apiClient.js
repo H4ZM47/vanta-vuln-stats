@@ -97,7 +97,7 @@ class VantaApiClient {
   async paginate({ endpoint, params = {}, onBatch, signal }) {
     const results = [];
     let pageCursor;
-    const { pageSize: initialPageSize = 100, ...restParams } = params;
+    const { pageSize: initialPageSize = 500, ...restParams } = params;
     let currentPageSize = initialPageSize;
 
     do {
@@ -145,17 +145,15 @@ class VantaApiClient {
 
       results.push(...pageData);
 
-      // Reduced delay between pages from 500ms to 100ms for faster sync
-      // while still being respectful to the API
-      if (pageCursor) {
-        await sleep(100);
-      }
+      // Removed artificial delay - API has built-in rate limiting (429 status)
+      // which we handle with exponential backoff in requestWithRetry
+      // This provides massive speedup without overwhelming the API
     } while (pageCursor);
 
     return results;
   }
 
-  async getVulnerabilities({ pageSize = 100, onBatch, filters = {}, signal } = {}) {
+  async getVulnerabilities({ pageSize = 500, onBatch, filters = {}, signal } = {}) {
     return this.paginate({
       endpoint: '/vulnerabilities',
       params: { pageSize, ...filters },
@@ -164,7 +162,7 @@ class VantaApiClient {
     });
   }
 
-  async getRemediations({ pageSize = 100, onBatch, filters = {}, signal } = {}) {
+  async getRemediations({ pageSize = 500, onBatch, filters = {}, signal } = {}) {
     return this.paginate({
       endpoint: '/vulnerability-remediations',
       params: { pageSize, ...filters },

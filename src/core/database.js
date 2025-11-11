@@ -301,6 +301,22 @@ class VulnerabilityDatabase {
       let remediatedCount = 0;
       const now = dayjs().toISOString();
 
+      // Batch lookup: Get all existing records in one query
+      const ids = rows.filter(row => row?.id).map(row => row.id);
+      if (ids.length === 0) {
+        return { new: 0, updated: 0, remediated: 0, total: 0 };
+      }
+
+      const placeholders = ids.map(() => '?').join(',');
+      const existingRecords = this.db.prepare(
+        `SELECT id, raw_data FROM vulnerabilities WHERE id IN (${placeholders})`
+      ).all(...ids);
+
+      // Build lookup map for O(1) access
+      const existingMap = new Map(
+        existingRecords.map(rec => [rec.id, rec.raw_data])
+      );
+
       rows.forEach((row) => {
         if (!row?.id) {
           return;
@@ -308,12 +324,15 @@ class VulnerabilityDatabase {
         const payload = this._normaliseVulnerability(row);
         payload.updated_at = now;
 
-        const existing = this.statements.selectVulnerabilityRaw.get(row.id);
-        if (!existing) {
+        const existingRawData = existingMap.get(row.id);
+        if (!existingRawData) {
           newCount += 1;
-        } else if (existing.raw_data !== payload.raw_data) {
+          if (row?.deactivateMetadata?.deactivatedOnDate) {
+            remediatedCount += 1;
+          }
+        } else if (existingRawData !== payload.raw_data) {
           updatedCount += 1;
-          const existingJson = JSON.parse(existing.raw_data);
+          const existingJson = JSON.parse(existingRawData);
           const wasActive = !(existingJson?.deactivateMetadata?.deactivatedOnDate);
           const isNowDeactivated = Boolean(row?.deactivateMetadata?.deactivatedOnDate);
           if (wasActive && isNowDeactivated) {
@@ -321,11 +340,10 @@ class VulnerabilityDatabase {
           }
         }
 
-        if (!existing && row?.deactivateMetadata?.deactivatedOnDate) {
-          remediatedCount += 1;
-        }
-
         this.statements.upsertVulnerability.run(payload);
+
+        // Update map so duplicate IDs within same batch are treated as updates
+        existingMap.set(row.id, payload.raw_data);
       });
 
       return { new: newCount, updated: updatedCount, remediated: remediatedCount, total: rows.length };
@@ -367,19 +385,39 @@ class VulnerabilityDatabase {
       let updatedCount = 0;
       const now = dayjs().toISOString();
 
+      // Batch lookup: Get all existing records in one query
+      const ids = rows.filter(row => row?.id).map(row => row.id);
+      if (ids.length === 0) {
+        return { new: 0, updated: 0, total: 0 };
+      }
+
+      const placeholders = ids.map(() => '?').join(',');
+      const existingRecords = this.db.prepare(
+        `SELECT id, raw_data FROM vulnerability_remediations WHERE id IN (${placeholders})`
+      ).all(...ids);
+
+      // Build lookup map for O(1) access
+      const existingMap = new Map(
+        existingRecords.map(rec => [rec.id, rec.raw_data])
+      );
+
       rows.forEach((row) => {
         if (!row?.id) {
           return;
         }
         const payload = this._normaliseRemediation(row);
         payload.updated_at = now;
-        const existing = this.statements.selectRemediationRaw.get(row.id);
-        if (!existing) {
+
+        const existingRawData = existingMap.get(row.id);
+        if (!existingRawData) {
           newCount += 1;
-        } else if (existing.raw_data !== payload.raw_data) {
+        } else if (existingRawData !== payload.raw_data) {
           updatedCount += 1;
         }
         this.statements.upsertRemediation.run(payload);
+
+        // Update map so duplicate IDs within same batch are treated as updates
+        existingMap.set(row.id, payload.raw_data);
       });
 
       return { new: newCount, updated: updatedCount, total: rows.length };
