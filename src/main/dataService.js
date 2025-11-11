@@ -1,13 +1,28 @@
 const path = require('path');
-const { app } = require('electron');
+let electronApp = null;
+try {
+  ({ app: electronApp } = require('electron'));
+} catch (error) {
+  // Running outside of Electron (e.g., during tests)
+  electronApp = null;
+}
 const Store = require('electron-store');
 const { VantaApiClient } = require('../core/apiClient');
 const { VulnerabilityDatabase } = require('../core/database');
 const { formatStatistics } = require('../core/stats');
 
 class DataService {
-  constructor() {
-    this.store = new Store({
+  constructor(options = {}) {
+    const {
+      store,
+      databasePath,
+      appInstance,
+      databaseFactory,
+      apiClientFactory,
+      userDataPath,
+    } = options;
+
+    this.store = store ?? new Store({
       name: 'settings',
       defaults: {
         credentials: {
@@ -17,8 +32,16 @@ class DataService {
       },
     });
 
-    this.databasePath = path.join(app.getPath('userData'), 'storage', 'vanta_vulnerabilities.db');
-    this.database = new VulnerabilityDatabase(this.databasePath);
+    this.app = appInstance ?? electronApp;
+
+    const defaultUserDataPath =
+      userDataPath ??
+      (this.app?.getPath ? this.app.getPath('userData') : path.join(process.cwd(), 'user-data'));
+
+    this.databasePath = databasePath ?? path.join(defaultUserDataPath, 'storage', 'vanta_vulnerabilities.db');
+    const createDatabase = databaseFactory ?? ((filePath) => new VulnerabilityDatabase(filePath));
+    this.database = createDatabase(this.databasePath);
+    this.createApiClient = apiClientFactory ?? ((credentials) => new VantaApiClient(credentials));
     this.activeSync = null;
     this.syncState = {
       state: 'idle', // idle, running, paused, stopping
@@ -49,7 +72,7 @@ class DataService {
       throw new Error('Client ID and Client Secret must be configured before syncing.');
     }
 
-    const apiClient = new VantaApiClient({
+    const apiClient = this.createApiClient({
       clientId: credentials.clientId,
       clientSecret: credentials.clientSecret,
     });
@@ -71,6 +94,8 @@ class DataService {
 
       let vulnerabilitiesStats = { new: 0, updated: 0, remediated: 0, total: 0 };
       let remediationsStats = { new: 0, updated: 0, total: 0 };
+      let processedVulnerabilities = 0;
+      let processedRemediations = 0;
 
       // Helper to check for pause/stop
       const checkPauseOrStop = async () => {
@@ -90,30 +115,55 @@ class DataService {
         }
       };
 
+      const flushVulnerabilityBuffer = () => {
+        if (!vulnerabilities.length) {
+          return;
+        }
+        const stats = this.database.storeVulnerabilitiesBatch(vulnerabilities);
+        vulnerabilitiesStats.new += stats.new;
+        vulnerabilitiesStats.updated += stats.updated;
+        vulnerabilitiesStats.remediated += stats.remediated;
+        vulnerabilitiesStats.total += stats.total;
+
+        onIncrementalUpdate?.({
+          type: 'vulnerabilities',
+          stats: { ...vulnerabilitiesStats },
+          flushed: stats.total,
+        });
+
+        vulnerabilities.length = 0;
+      };
+
+      const flushRemediationBuffer = () => {
+        if (!remediations.length) {
+          return;
+        }
+        const stats = this.database.storeRemediationsBatch(remediations);
+        remediationsStats.new += stats.new;
+        remediationsStats.updated += stats.updated;
+        remediationsStats.total += stats.total;
+
+        onIncrementalUpdate?.({
+          type: 'remediations',
+          stats: { ...remediationsStats },
+          flushed: stats.total,
+        });
+
+        remediations.length = 0;
+      };
+
       // Fetch vulnerabilities and remediations in parallel for faster sync
       await Promise.all([
         apiClient.getVulnerabilities({
           onBatch: async (batch) => {
             await checkPauseOrStop();
             vulnerabilities.push(...batch);
-            progressCallback?.({ type: 'vulnerabilities', count: vulnerabilities.length });
+            processedVulnerabilities += batch.length;
+            progressCallback?.({ type: 'vulnerabilities', count: processedVulnerabilities });
 
             // Flush to database every 1000 records
             if (vulnerabilities.length >= BATCH_SIZE) {
-              const stats = this.database.storeVulnerabilitiesBatch(vulnerabilities);
-              vulnerabilitiesStats.new += stats.new;
-              vulnerabilitiesStats.updated += stats.updated;
-              vulnerabilitiesStats.remediated += stats.remediated;
-              vulnerabilitiesStats.total += stats.total;
-
-              // Notify about incremental update
-              onIncrementalUpdate?.({
-                type: 'vulnerabilities',
-                stats: { ...vulnerabilitiesStats },
-                flushed: vulnerabilities.length,
-              });
-
-              vulnerabilities.length = 0; // Clear the buffer
+              flushVulnerabilityBuffer();
             }
           },
           signal: this.syncState.abortController.signal,
@@ -122,23 +172,12 @@ class DataService {
           onBatch: async (batch) => {
             await checkPauseOrStop();
             remediations.push(...batch);
-            progressCallback?.({ type: 'remediations', count: remediations.length });
+            processedRemediations += batch.length;
+            progressCallback?.({ type: 'remediations', count: processedRemediations });
 
             // Flush to database every 1000 records
             if (remediations.length >= BATCH_SIZE) {
-              const stats = this.database.storeRemediationsBatch(remediations);
-              remediationsStats.new += stats.new;
-              remediationsStats.updated += stats.updated;
-              remediationsStats.total += stats.total;
-
-              // Notify about incremental update
-              onIncrementalUpdate?.({
-                type: 'remediations',
-                stats: { ...remediationsStats },
-                flushed: remediations.length,
-              });
-
-              remediations.length = 0; // Clear the buffer
+              flushRemediationBuffer();
             }
           },
           signal: this.syncState.abortController.signal,
@@ -147,32 +186,15 @@ class DataService {
 
       // Store any remaining records
       if (vulnerabilities.length > 0) {
-        const stats = this.database.storeVulnerabilitiesBatch(vulnerabilities);
-        vulnerabilitiesStats.new += stats.new;
-        vulnerabilitiesStats.updated += stats.updated;
-        vulnerabilitiesStats.remediated += stats.remediated;
-        vulnerabilitiesStats.total += stats.total;
+        flushVulnerabilityBuffer();
       }
 
       if (remediations.length > 0) {
-        const stats = this.database.storeRemediationsBatch(remediations);
-        remediationsStats.new += stats.new;
-        remediationsStats.updated += stats.updated;
-        remediationsStats.total += stats.total;
+        flushRemediationBuffer();
       }
 
-      // Record final sync history
-      const now = require('dayjs')().toISOString();
-      this.database.statements.insertSync.run({
-        sync_date: now,
-        vulnerabilities_count: vulnerabilitiesStats.total,
-        new_count: vulnerabilitiesStats.new,
-        updated_count: vulnerabilitiesStats.updated,
-        remediated_count: vulnerabilitiesStats.remediated,
-      });
-
       // Record combined sync history
-      this.database.recordSyncHistory(vulnerabilityStats, remediationStats);
+      this.database.recordSyncHistory(vulnerabilitiesStats, remediationsStats);
 
       return {
         vulnerabilities: vulnerabilitiesStats,
