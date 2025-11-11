@@ -11,7 +11,24 @@ const { VantaApiClient } = require('../core/apiClient');
 const { VulnerabilityDatabase } = require('../core/database');
 const { formatStatistics } = require('../core/stats');
 
+/**
+ * Service for managing vulnerability data synchronization and storage.
+ * Supports dependency injection for testing and custom configurations.
+ */
 class DataService {
+  /**
+   * Creates a new DataService instance.
+   *
+   * @param {Object} [options={}] - Configuration options
+   * @param {Object} [options.store] - Custom store implementation for settings
+   * @param {string} [options.databasePath] - Custom path for the database file
+   * @param {Object} [options.appInstance] - Custom Electron app instance
+   * @param {Function} [options.databaseFactory] - Factory function to create database instances
+   * @param {Function} [options.apiClientFactory] - Factory function to create API client instances
+   * @param {string} [options.userDataPath] - Custom user data directory path
+   * @param {number} [options.batchSize=1000] - Number of records to buffer before flushing to database
+   * @throws {TypeError} If factory functions are not functions
+   */
   constructor(options = {}) {
     const {
       store,
@@ -20,7 +37,16 @@ class DataService {
       databaseFactory,
       apiClientFactory,
       userDataPath,
+      batchSize,
     } = options;
+
+    // Validate factory functions if provided
+    if (databaseFactory !== undefined && typeof databaseFactory !== 'function') {
+      throw new TypeError('databaseFactory must be a function');
+    }
+    if (apiClientFactory !== undefined && typeof apiClientFactory !== 'function') {
+      throw new TypeError('apiClientFactory must be a function');
+    }
 
     this.store = store ?? new Store({
       name: 'settings',
@@ -42,6 +68,7 @@ class DataService {
     const createDatabase = databaseFactory ?? ((filePath) => new VulnerabilityDatabase(filePath));
     this.database = createDatabase(this.databasePath);
     this.createApiClient = apiClientFactory ?? ((credentials) => new VantaApiClient(credentials));
+    this.batchSize = batchSize ?? 1000;
     this.activeSync = null;
     this.syncState = {
       state: 'idle', // idle, running, paused, stopping
@@ -62,6 +89,19 @@ class DataService {
     return merged;
   }
 
+  /**
+   * Synchronizes vulnerability and remediation data from the Vanta API.
+   * Fetches data in batches, persists to database, and provides progress updates.
+   *
+   * @param {Function} [progressCallback] - Called with progress updates: {type: string, count: number}
+   * @param {Function} [onIncrementalUpdate] - Called when batches are flushed: {type: string, stats: Object, flushed: number}
+   * @param {Function} [stateCallback] - Called with state changes: 'running' | 'paused' | 'idle'
+   * @returns {Promise<{vulnerabilities: Object, remediations: Object}>} Statistics about synced data
+   * @throws {Error} If a sync is already in progress
+   * @throws {Error} If credentials are not configured
+   * @throws {Error} If sync is stopped by user
+   * @throws {Error} If database flush operations fail
+   */
   async syncData(progressCallback, onIncrementalUpdate, stateCallback) {
     if (this.activeSync) {
       throw new Error('A sync is already in progress.');
@@ -90,7 +130,6 @@ class DataService {
     try {
       const vulnerabilities = [];
       const remediations = [];
-      const BATCH_SIZE = 1000;
 
       let vulnerabilitiesStats = { new: 0, updated: 0, remediated: 0, total: 0 };
       let remediationsStats = { new: 0, updated: 0, total: 0 };
@@ -119,37 +158,45 @@ class DataService {
         if (!vulnerabilities.length) {
           return;
         }
-        const stats = this.database.storeVulnerabilitiesBatch(vulnerabilities);
-        vulnerabilitiesStats.new += stats.new;
-        vulnerabilitiesStats.updated += stats.updated;
-        vulnerabilitiesStats.remediated += stats.remediated;
-        vulnerabilitiesStats.total += stats.total;
+        try {
+          const stats = this.database.storeVulnerabilitiesBatch(vulnerabilities);
+          vulnerabilitiesStats.new += stats.new;
+          vulnerabilitiesStats.updated += stats.updated;
+          vulnerabilitiesStats.remediated += stats.remediated;
+          vulnerabilitiesStats.total += stats.total;
 
-        onIncrementalUpdate?.({
-          type: 'vulnerabilities',
-          stats: { ...vulnerabilitiesStats },
-          flushed: stats.total,
-        });
+          onIncrementalUpdate?.({
+            type: 'vulnerabilities',
+            stats: { ...vulnerabilitiesStats },
+            flushed: stats.total,
+          });
 
-        vulnerabilities.length = 0;
+          vulnerabilities.length = 0;
+        } catch (error) {
+          throw new Error(`Failed to flush vulnerability buffer: ${error.message}`);
+        }
       };
 
       const flushRemediationBuffer = () => {
         if (!remediations.length) {
           return;
         }
-        const stats = this.database.storeRemediationsBatch(remediations);
-        remediationsStats.new += stats.new;
-        remediationsStats.updated += stats.updated;
-        remediationsStats.total += stats.total;
+        try {
+          const stats = this.database.storeRemediationsBatch(remediations);
+          remediationsStats.new += stats.new;
+          remediationsStats.updated += stats.updated;
+          remediationsStats.total += stats.total;
 
-        onIncrementalUpdate?.({
-          type: 'remediations',
-          stats: { ...remediationsStats },
-          flushed: stats.total,
-        });
+          onIncrementalUpdate?.({
+            type: 'remediations',
+            stats: { ...remediationsStats },
+            flushed: stats.total,
+          });
 
-        remediations.length = 0;
+          remediations.length = 0;
+        } catch (error) {
+          throw new Error(`Failed to flush remediation buffer: ${error.message}`);
+        }
       };
 
       // Fetch vulnerabilities and remediations in parallel for faster sync
@@ -161,8 +208,8 @@ class DataService {
             processedVulnerabilities += batch.length;
             progressCallback?.({ type: 'vulnerabilities', count: processedVulnerabilities });
 
-            // Flush to database every 1000 records
-            if (vulnerabilities.length >= BATCH_SIZE) {
+            // Flush to database when buffer reaches batch size
+            if (vulnerabilities.length >= this.batchSize) {
               flushVulnerabilityBuffer();
             }
           },
@@ -175,8 +222,8 @@ class DataService {
             processedRemediations += batch.length;
             progressCallback?.({ type: 'remediations', count: processedRemediations });
 
-            // Flush to database every 1000 records
-            if (remediations.length >= BATCH_SIZE) {
+            // Flush to database when buffer reaches batch size
+            if (remediations.length >= this.batchSize) {
               flushRemediationBuffer();
             }
           },
