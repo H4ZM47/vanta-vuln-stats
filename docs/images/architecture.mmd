@@ -1,0 +1,52 @@
+graph TB
+    subgraph "Renderer Process (UI)"
+        UI[index.js<br/>State Management & UI Logic]
+        HTML[index.html<br/>Dashboard Layout]
+    end
+
+    subgraph "Main Process (Electron)"
+        Main[main.js<br/>IPC Handlers & Window Management]
+        Preload[preload.js<br/>Secure IPC Bridge]
+        DataService[dataService.js<br/>Orchestration Layer]
+    end
+
+    subgraph "Core Layer"
+        ApiClient[apiClient.js<br/>Vanta API Client<br/>OAuth + Pagination + Retry]
+        Database[database.js<br/>SQLite Operations<br/>CRUD + Statistics]
+        Stats[stats.js<br/>Statistics Formatting]
+    end
+
+    subgraph "External Dependencies"
+        VantaAPI[Vanta API<br/>api.vanta.com/v1]
+        SQLite[(SQLite DB<br/>vanta_vulnerabilities.db)]
+        Store[electron-store<br/>Credentials Storage]
+    end
+
+    %% User Interactions
+    UI -->|IPC Invoke| Preload
+    Preload -->|Secure Bridge| Main
+
+    %% Main Process Coordination
+    Main -->|"sync:run<br/>stats:get<br/>vulnerabilities:list"| DataService
+    Main -->|"sync:progress<br/>sync:incremental"| UI
+
+    %% Data Service Orchestration
+    DataService -->|"authenticate, getVulnerabilities, getRemediations"| ApiClient
+    DataService -->|"storeVulnerabilitiesBatch, getStatistics, getVulnerabilities"| Database
+    DataService -->|formatStatistics| Stats
+    DataService -->|get/set credentials| Store
+
+    %% External Communication
+    ApiClient -->|OAuth + REST API| VantaAPI
+    Database -->|SQL Queries| SQLite
+
+    %% Data Flow Labels
+    Main -.->|Stream Progress Events| UI
+
+    style UI fill:#e1f5ff
+    style Main fill:#fff3e0
+    style DataService fill:#fff3e0
+    style ApiClient fill:#f3e5f5
+    style Database fill:#f3e5f5
+    style VantaAPI fill:#e8f5e9
+    style SQLite fill:#e8f5e9
