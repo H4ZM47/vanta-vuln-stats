@@ -305,6 +305,28 @@ select[multiple] {
   border-bottom: 1px solid rgba(148, 163, 184, 0.08);
 }
 
+.data-table th.sortable {
+  cursor: pointer;
+  user-select: none;
+  transition: background 0.2s ease, color 0.2s ease;
+}
+
+.data-table th.sortable:hover {
+  background: rgba(56, 189, 248, 0.15);
+  color: var(--color-accent);
+}
+
+.data-table th.sortable .sort-indicator {
+  margin-left: 0.3rem;
+  font-size: 0.65rem;
+  color: rgba(148, 163, 184, 0.5);
+}
+
+.data-table th.sortable.sort-asc .sort-indicator,
+.data-table th.sortable.sort-desc .sort-indicator {
+  color: var(--color-accent);
+}
+
 .data-table tbody tr {
   cursor: pointer;
   transition: background 0.2s ease;

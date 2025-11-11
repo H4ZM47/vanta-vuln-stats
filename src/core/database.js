@@ -456,15 +456,44 @@ class VulnerabilityDatabase {
     return { where, params };
   }
 
-  getVulnerabilities({ filters = {}, limit = 100, offset = 0 } = {}) {
+  getVulnerabilities({ filters = {}, limit = 100, offset = 0, sortColumn = 'first_detected', sortDirection = 'desc' } = {}) {
     const { where, params } = this.buildFilters(filters);
+
+    // Map of allowed sort columns to prevent SQL injection
+    const allowedColumns = {
+      id: 'id',
+      name: 'name',
+      severity: 'severity',
+      integration_id: 'integration_id',
+      target_id: 'target_id',
+      first_detected: 'first_detected',
+      status: 'deactivated_on', // Special case: status is based on deactivated_on
+    };
+
+    // Validate and sanitize sort column
+    const actualColumn = allowedColumns[sortColumn] || 'first_detected';
+
+    // Validate sort direction
+    const direction = sortDirection.toLowerCase() === 'asc' ? 'ASC' : 'DESC';
+
+    // Build ORDER BY clause
+    let orderBy;
+    if (sortColumn === 'status') {
+      // For status, sort by whether deactivated_on is null (Active vs Remediated)
+      // NULL first means Active first when DESC, Remediated first when ASC
+      orderBy = `ORDER BY (deactivated_on IS NULL) ${direction}, name ASC`;
+    } else {
+      // Handle NULL values properly - put them at the end
+      orderBy = `ORDER BY (${actualColumn} IS NULL), ${actualColumn} ${direction}, name ASC`;
+    }
+
     const query = `
       SELECT id, name, description, integration_id, target_id, severity, first_detected,
              last_detected, deactivated_on, is_fixable, cvss_score, package_identifier,
              vulnerability_type, remediate_by, external_url, scan_source
       FROM vulnerabilities
       ${where}
-      ORDER BY (first_detected IS NULL), first_detected DESC, name ASC
+      ${orderBy}
       LIMIT @limit OFFSET @offset;
     `;
     const stmt = this.db.prepare(query);

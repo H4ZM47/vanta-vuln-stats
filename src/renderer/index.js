@@ -56,6 +56,8 @@ const state = {
   total: 0,
   vulnerabilities: [],
   selectedId: null,
+  sortColumn: 'first_detected',
+  sortDirection: 'desc',
   syncState: 'idle', // idle, running, paused, stopping
   currentSync: {
     vulnerabilities: { count: 0, status: 'idle' }, // idle, syncing, completed
@@ -328,6 +330,27 @@ const renderVulnerabilities = () => {
     .join('');
 };
 
+const renderSortIndicators = () => {
+  // Clear all indicators first
+  document.querySelectorAll('.data-table thead th').forEach((th) => {
+    th.classList.remove('sort-asc', 'sort-desc');
+    const indicator = th.querySelector('.sort-indicator');
+    if (indicator) {
+      indicator.textContent = '';
+    }
+  });
+
+  // Add indicator to current sort column
+  const currentHeader = document.querySelector(`.data-table thead th[data-column="${state.sortColumn}"]`);
+  if (currentHeader) {
+    const indicator = currentHeader.querySelector('.sort-indicator');
+    if (indicator) {
+      indicator.textContent = state.sortDirection === 'asc' ? '▲' : '▼';
+    }
+    currentHeader.classList.add(state.sortDirection === 'asc' ? 'sort-asc' : 'sort-desc');
+  }
+};
+
 const renderPagination = () => {
   const start = (state.page - 1) * PAGE_SIZE + 1;
   const end = Math.min(state.page * PAGE_SIZE, state.total);
@@ -412,11 +435,14 @@ const loadVulnerabilities = async () => {
     filters: state.filters,
     limit: PAGE_SIZE,
     offset,
+    sortColumn: state.sortColumn,
+    sortDirection: state.sortDirection,
   });
   state.vulnerabilities = response.data;
   state.total = response.total;
   renderVulnerabilities();
   renderPagination();
+  renderSortIndicators();
 };
 
 const selectVulnerability = async (id) => {
@@ -444,6 +470,28 @@ const handleTableClick = (event) => {
   if (!row) return;
   const id = row.getAttribute('data-id');
   selectVulnerability(id);
+};
+
+const handleColumnSort = async (event) => {
+  const th = event.target.closest('th.sortable');
+  if (!th) return;
+
+  const column = th.getAttribute('data-column');
+  if (!column) return;
+
+  // Toggle direction if clicking the same column, otherwise default to descending
+  if (state.sortColumn === column) {
+    state.sortDirection = state.sortDirection === 'asc' ? 'desc' : 'asc';
+  } else {
+    state.sortColumn = column;
+    state.sortDirection = 'desc';
+  }
+
+  // Reset to first page when sorting changes
+  state.page = 1;
+
+  await loadVulnerabilities();
+  resetDetails();
 };
 
 const attachEventListeners = () => {
@@ -547,6 +595,11 @@ const attachEventListeners = () => {
   });
 
   elements.vulnerabilityTable.addEventListener('click', handleTableClick);
+
+  // Attach column sort handlers
+  document.querySelectorAll('.data-table thead th.sortable').forEach((th) => {
+    th.addEventListener('click', handleColumnSort);
+  });
 
   window.vanta.onSyncState(({ state: newState }) => {
     updateSyncButtons(newState);
