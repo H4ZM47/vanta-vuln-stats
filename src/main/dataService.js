@@ -20,6 +20,12 @@ class DataService {
     this.databasePath = path.join(app.getPath('userData'), 'storage', 'vanta_vulnerabilities.db');
     this.database = new VulnerabilityDatabase(this.databasePath);
     this.activeSync = null;
+    this.syncState = {
+      state: 'idle', // idle, running, paused, stopping
+      abortController: null,
+      pausePromiseResolve: null,
+      isPaused: false,
+    };
   }
 
   getCredentials() {
@@ -33,7 +39,7 @@ class DataService {
     return merged;
   }
 
-  async syncData(progressCallback, onIncrementalUpdate) {
+  async syncData(progressCallback, onIncrementalUpdate, stateCallback) {
     if (this.activeSync) {
       throw new Error('A sync is already in progress.');
     }
@@ -53,6 +59,10 @@ class DataService {
     };
 
     this.activeSync = syncState;
+    this.syncState.state = 'running';
+    this.syncState.abortController = new AbortController();
+    this.syncState.isPaused = false;
+    stateCallback?.('running');
 
     try {
       const vulnerabilities = [];
@@ -62,10 +72,29 @@ class DataService {
       let vulnerabilitiesStats = { new: 0, updated: 0, remediated: 0, total: 0 };
       let remediationsStats = { new: 0, updated: 0, total: 0 };
 
+      // Helper to check for pause/stop
+      const checkPauseOrStop = async () => {
+        // Check if stopping
+        if (this.syncState.abortController.signal.aborted) {
+          throw new Error('Sync stopped by user');
+        }
+
+        // Check if paused
+        if (this.syncState.isPaused) {
+          stateCallback?.('paused');
+          // Wait until resumed or stopped
+          await new Promise((resolve) => {
+            this.syncState.pausePromiseResolve = resolve;
+          });
+          stateCallback?.('running');
+        }
+      };
+
       // Fetch vulnerabilities and remediations in parallel for faster sync
       await Promise.all([
         apiClient.getVulnerabilities({
           onBatch: async (batch) => {
+            await checkPauseOrStop();
             vulnerabilities.push(...batch);
             progressCallback?.({ type: 'vulnerabilities', count: vulnerabilities.length });
 
@@ -87,9 +116,11 @@ class DataService {
               vulnerabilities.length = 0; // Clear the buffer
             }
           },
+          signal: this.syncState.abortController.signal,
         }),
         apiClient.getRemediations({
           onBatch: async (batch) => {
+            await checkPauseOrStop();
             remediations.push(...batch);
             progressCallback?.({ type: 'remediations', count: remediations.length });
 
@@ -110,6 +141,7 @@ class DataService {
               remediations.length = 0; // Clear the buffer
             }
           },
+          signal: this.syncState.abortController.signal,
         }),
       ]);
 
@@ -143,9 +175,69 @@ class DataService {
         vulnerabilities: vulnerabilitiesStats,
         remediations: remediationsStats,
       };
+    } catch (error) {
+      if (error.message === 'Sync stopped by user') {
+        stateCallback?.('idle');
+        throw error;
+      }
+      throw error;
     } finally {
       this.activeSync = null;
+      this.syncState.state = 'idle';
+      this.syncState.abortController = null;
+      this.syncState.pausePromiseResolve = null;
+      this.syncState.isPaused = false;
+      stateCallback?.('idle');
     }
+  }
+
+  pauseSync() {
+    if (this.syncState.state !== 'running') {
+      throw new Error('No active sync to pause.');
+    }
+    this.syncState.isPaused = true;
+    this.syncState.state = 'paused';
+    return { success: true };
+  }
+
+  resumeSync() {
+    if (this.syncState.state !== 'paused') {
+      throw new Error('Sync is not paused.');
+    }
+    this.syncState.isPaused = false;
+    this.syncState.state = 'running';
+    if (this.syncState.pausePromiseResolve) {
+      this.syncState.pausePromiseResolve();
+      this.syncState.pausePromiseResolve = null;
+    }
+    return { success: true };
+  }
+
+  stopSync() {
+    if (!this.activeSync) {
+      throw new Error('No active sync to stop.');
+    }
+    this.syncState.state = 'stopping';
+
+    // If paused, resolve the pause promise first
+    if (this.syncState.pausePromiseResolve) {
+      this.syncState.pausePromiseResolve();
+      this.syncState.pausePromiseResolve = null;
+    }
+
+    // Abort the sync
+    if (this.syncState.abortController) {
+      this.syncState.abortController.abort();
+    }
+
+    return { success: true };
+  }
+
+  getSyncState() {
+    return {
+      state: this.syncState.state,
+      hasActiveSync: !!this.activeSync,
+    };
   }
 
   getStatistics(filters) {

@@ -86,9 +86,20 @@ button.link {
   padding: 0.25rem 0.5rem;
 }
 
+button.danger {
+  background: var(--color-danger);
+  color: white;
+  font-weight: 600;
+  box-shadow: 0 12px 24px rgba(249, 115, 22, 0.35);
+}
+
 button:hover {
   transform: translateY(-1px);
   box-shadow: 0 16px 32px rgba(56, 189, 248, 0.2);
+}
+
+button.danger:hover {
+  box-shadow: 0 16px 32px rgba(249, 115, 22, 0.4);
 }
 
 button:disabled {
@@ -96,6 +107,11 @@ button:disabled {
   cursor: not-allowed;
   transform: none;
   box-shadow: none;
+}
+
+.sync-controls {
+  display: flex;
+  gap: 0.5rem;
 }
 
 .status {

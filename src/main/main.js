@@ -65,8 +65,12 @@ ipcMain.handle('sync:run', async () => {
     mainWindow.webContents.send('sync:incremental', update);
   };
 
+  const stateEmitter = (state) => {
+    mainWindow.webContents.send('sync:state', { state });
+  };
+
   try {
-    const result = await dataService.syncData(progressEmitter, incrementalUpdateEmitter);
+    const result = await dataService.syncData(progressEmitter, incrementalUpdateEmitter, stateEmitter);
     mainWindow.webContents.send('sync:completed', result);
     return result;
   } catch (error) {
@@ -74,3 +78,11 @@ ipcMain.handle('sync:run', async () => {
     throw error;
   }
 });
+
+ipcMain.handle('sync:pause', () => dataService.pauseSync());
+
+ipcMain.handle('sync:resume', () => dataService.resumeSync());
+
+ipcMain.handle('sync:stop', () => dataService.stopSync());
+
+ipcMain.handle('sync:state', () => dataService.getSyncState());

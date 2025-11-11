@@ -5,7 +5,10 @@ const elements = {
   clientSecret: document.getElementById('clientSecret'),
   saveCredentials: document.getElementById('saveCredentials'),
   credentialsStatus: document.getElementById('credentialsStatus'),
-  syncButton: document.getElementById('syncButton'),
+  startSyncButton: document.getElementById('startSyncButton'),
+  pauseSyncButton: document.getElementById('pauseSyncButton'),
+  resumeSyncButton: document.getElementById('resumeSyncButton'),
+  stopSyncButton: document.getElementById('stopSyncButton'),
   syncStatus: document.getElementById('syncStatus'),
   statistics: document.getElementById('statistics'),
   syncHistoryBody: document.getElementById('syncHistoryBody'),
@@ -50,7 +53,7 @@ const state = {
   total: 0,
   vulnerabilities: [],
   selectedId: null,
-  syncing: false,
+  syncState: 'idle', // idle, running, paused, stopping
 };
 
 const toISODate = (value) => {
@@ -77,6 +80,34 @@ const formatDateTime = (value) => {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
   return date.toLocaleString();
+};
+
+const updateSyncButtons = (syncState) => {
+  state.syncState = syncState;
+
+  // Hide all buttons first
+  elements.startSyncButton.style.display = 'none';
+  elements.pauseSyncButton.style.display = 'none';
+  elements.resumeSyncButton.style.display = 'none';
+  elements.stopSyncButton.style.display = 'none';
+
+  // Show appropriate buttons based on state
+  switch (syncState) {
+    case 'idle':
+      elements.startSyncButton.style.display = 'inline-block';
+      break;
+    case 'running':
+      elements.pauseSyncButton.style.display = 'inline-block';
+      elements.stopSyncButton.style.display = 'inline-block';
+      break;
+    case 'paused':
+      elements.resumeSyncButton.style.display = 'inline-block';
+      elements.stopSyncButton.style.display = 'inline-block';
+      break;
+    case 'stopping':
+      // No buttons shown while stopping
+      break;
+  }
 };
 
 const renderStatistics = (stats) => {
@@ -314,19 +345,52 @@ const attachEventListeners = () => {
     }, 2500);
   });
 
-  elements.syncButton.addEventListener('click', async () => {
-    if (state.syncing) {
+  elements.startSyncButton.addEventListener('click', async () => {
+    if (state.syncState !== 'idle') {
       return;
     }
-    state.syncing = true;
-    elements.syncButton.disabled = true;
-    elements.syncStatus.textContent = 'Syncing…';
+    elements.syncStatus.textContent = 'Starting sync…';
     try {
       await window.vanta.runSync();
     } catch (error) {
       elements.syncStatus.textContent = `Sync failed: ${error.message}`;
-      state.syncing = false;
-      elements.syncButton.disabled = false;
+      updateSyncButtons('idle');
+    }
+  });
+
+  elements.pauseSyncButton.addEventListener('click', async () => {
+    if (state.syncState !== 'running') {
+      return;
+    }
+    try {
+      await window.vanta.pauseSync();
+      elements.syncStatus.textContent = 'Sync paused.';
+    } catch (error) {
+      elements.syncStatus.textContent = `Failed to pause: ${error.message}`;
+    }
+  });
+
+  elements.resumeSyncButton.addEventListener('click', async () => {
+    if (state.syncState !== 'paused') {
+      return;
+    }
+    try {
+      await window.vanta.resumeSync();
+      elements.syncStatus.textContent = 'Sync resumed…';
+    } catch (error) {
+      elements.syncStatus.textContent = `Failed to resume: ${error.message}`;
+    }
+  });
+
+  elements.stopSyncButton.addEventListener('click', async () => {
+    if (state.syncState !== 'running' && state.syncState !== 'paused') {
+      return;
+    }
+    try {
+      await window.vanta.stopSync();
+      elements.syncStatus.textContent = 'Stopping sync…';
+    } catch (error) {
+      elements.syncStatus.textContent = `Failed to stop: ${error.message}`;
     }
   });
 
@@ -360,6 +424,10 @@ const attachEventListeners = () => {
 
   elements.vulnerabilityTable.addEventListener('click', handleTableClick);
 
+  window.vanta.onSyncState(({ state: newState }) => {
+    updateSyncButtons(newState);
+  });
+
   window.vanta.onSyncProgress(({ type, count }) => {
     const label = type === 'vulnerabilities' ? 'Vulnerabilities' : 'Remediations';
     elements.syncStatus.textContent = `Syncing ${label}: ${formatNumber(count)} records processed…`;
@@ -378,8 +446,7 @@ const attachEventListeners = () => {
 
   window.vanta.onSyncCompleted(async () => {
     elements.syncStatus.textContent = 'Sync complete! Refreshing data…';
-    state.syncing = false;
-    elements.syncButton.disabled = false;
+    updateSyncButtons('idle');
     await Promise.all([loadStatistics(), loadVulnerabilities(), loadSyncHistory()]);
     elements.syncStatus.textContent = 'Sync complete.';
     setTimeout(() => {
@@ -389,8 +456,7 @@ const attachEventListeners = () => {
 
   window.vanta.onSyncError((payload) => {
     elements.syncStatus.textContent = `Sync failed: ${payload?.message || 'Unknown error'}`;
-    state.syncing = false;
-    elements.syncButton.disabled = false;
+    updateSyncButtons('idle');
   });
 };
 
@@ -399,6 +465,10 @@ const initialize = async () => {
   await loadVulnerabilities();
   populateFilterInputs();
   attachEventListeners();
+
+  // Initialize button state
+  const syncState = await window.vanta.getSyncState();
+  updateSyncButtons(syncState.state);
 };
 
 initialize().catch((error) => {
