@@ -71,6 +71,8 @@ This command emits the unsigned `.app` bundle to `dist/mac/`. Because Electron B
 
 ## Application Architecture
 
+### Directory Structure
+
 ```
 src/
 ├── core/
@@ -87,7 +89,83 @@ src/
     └── styles.css         # Aurora-inspired styling
 ```
 
-The main process coordinates API synchronization and database access, exposing IPC handlers that the renderer invokes through a hardened preload bridge. The renderer manages application state, renders dashboard components, and reacts to streaming sync progress events.
+### Architecture Diagram
+
+The application follows a layered architecture with clear separation between the UI (renderer), orchestration (main process), and data/API layers (core):
+
+```mermaid
+graph TB
+    subgraph "Renderer Process (UI)"
+        UI[index.js<br/>State Management & UI Logic]
+        HTML[index.html<br/>Dashboard Layout]
+    end
+
+    subgraph "Main Process (Electron)"
+        Main[main.js<br/>IPC Handlers & Window Management]
+        Preload[preload.js<br/>Secure IPC Bridge]
+        DataService[dataService.js<br/>Orchestration Layer]
+    end
+
+    subgraph "Core Layer"
+        ApiClient[apiClient.js<br/>Vanta API Client<br/>OAuth + Pagination + Retry]
+        Database[database.js<br/>SQLite Operations<br/>CRUD + Statistics]
+        Stats[stats.js<br/>Statistics Formatting]
+    end
+
+    subgraph "External Dependencies"
+        VantaAPI[Vanta API<br/>api.vanta.com/v1]
+        SQLite[(SQLite DB<br/>vanta_vulnerabilities.db)]
+        Store[electron-store<br/>Credentials Storage]
+    end
+
+    %% User Interactions
+    UI -->|IPC Invoke| Preload
+    Preload -->|Secure Bridge| Main
+
+    %% Main Process Coordination
+    Main -->|sync:run<br/>stats:get<br/>vulnerabilities:list| DataService
+    Main -->|sync:progress<br/>sync:incremental| UI
+
+    %% Data Service Orchestration
+    DataService -->|authenticate()<br/>getVulnerabilities()<br/>getRemediations()| ApiClient
+    DataService -->|storeVulnerabilitiesBatch()<br/>getStatistics()<br/>getVulnerabilities()| Database
+    DataService -->|formatStatistics()| Stats
+    DataService -->|get/set credentials| Store
+
+    %% External Communication
+    ApiClient -->|OAuth + REST API| VantaAPI
+    Database -->|SQL Queries| SQLite
+
+    %% Data Flow Labels
+    Main -.->|Stream Progress Events| UI
+
+    style UI fill:#e1f5ff
+    style Main fill:#fff3e0
+    style DataService fill:#fff3e0
+    style ApiClient fill:#f3e5f5
+    style Database fill:#f3e5f5
+    style VantaAPI fill:#e8f5e9
+    style SQLite fill:#e8f5e9
+```
+
+#### Data Flow for Sync Operation
+
+1. **User Initiates Sync**: UI calls `sync:run` via IPC
+2. **Authentication**: DataService retrieves credentials from electron-store and passes to ApiClient
+3. **API Requests**: ApiClient authenticates with Vanta OAuth, then paginates through vulnerabilities and remediations endpoints
+4. **Batch Processing**: ApiClient fetches data in batches (max 100 per page) with automatic retry on rate limits
+5. **Database Storage**: DataService buffers records (1000 at a time) then flushes to Database using transactions
+6. **Progress Updates**: DataService streams progress events back to UI via IPC (`sync:progress`, `sync:incremental`)
+7. **Statistics**: After sync completes, UI can query statistics which are calculated by Database and formatted by Stats
+
+#### Key Design Patterns
+
+- **IPC Security**: All renderer-to-main communication goes through a hardened preload script (no Node.js access in renderer)
+- **Batch Processing**: API responses and database writes are batched to optimize performance and reduce memory pressure
+- **Event Streaming**: Progress updates are streamed in real-time to keep the UI responsive during long syncs
+- **Transaction Safety**: All database writes use SQLite transactions to ensure atomicity
+- **Retry Logic**: API client implements exponential backoff for rate limits (429) and server errors (5xx)
+- **Credential Isolation**: Sensitive credentials stored via electron-store, never exposed to renderer process
 
 ## Configuration & Storage
 
