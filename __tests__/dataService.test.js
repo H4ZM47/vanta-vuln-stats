@@ -58,6 +58,7 @@ describe('DataService - Sync Operations', () => {
         total: 11,
       })),
       recordSyncHistory: jest.fn(),
+      logSyncEvent: jest.fn(),
       getStatistics: jest.fn(() => ({})),
       getVulnerabilities: jest.fn(() => []),
       getVulnerabilityCount: jest.fn(() => 0),

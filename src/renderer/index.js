@@ -129,6 +129,17 @@ const switchTab = (tabName) => {
   }
 };
 
+const showToast = (message, type = 'error', duration = 5000) => {
+  elements.toastMessage.textContent = message;
+  elements.toast.className = `toast toast-${type}`;
+  elements.toast.style.display = 'block';
+
+  // Auto-hide after duration
+  setTimeout(() => {
+    elements.toast.style.display = 'none';
+  }, duration);
+};
+
 const updateSyncButtons = (syncState) => {
   state.syncState = syncState;
 
@@ -817,6 +828,7 @@ const attachEventListeners = () => {
       await window.vanta.runSync();
     } catch (error) {
       updateSyncButtons('idle');
+      showToast(error.message || 'Failed to start sync');
     }
   });
 
@@ -827,7 +839,7 @@ const attachEventListeners = () => {
     try {
       await window.vanta.pauseSync();
     } catch (error) {
-      // Error is logged in sync history
+      showToast(error.message || 'Failed to pause sync');
     }
   });
 
@@ -838,7 +850,7 @@ const attachEventListeners = () => {
     try {
       await window.vanta.resumeSync();
     } catch (error) {
-      // Error is logged in sync history
+      showToast(error.message || 'Failed to resume sync');
     }
   });
 
@@ -849,7 +861,7 @@ const attachEventListeners = () => {
     try {
       await window.vanta.stopSync();
     } catch (error) {
-      // Error is logged in sync history
+      showToast(error.message || 'Failed to stop sync');
     }
   });
 
@@ -908,6 +920,7 @@ const attachEventListeners = () => {
 
   window.vanta.onSyncError((payload) => {
     updateSyncButtons('idle');
+    showToast(payload?.message || 'Sync operation failed');
     loadSyncHistory(); // Reload history to show error
   });
 };
