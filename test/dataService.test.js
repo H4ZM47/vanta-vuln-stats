@@ -65,10 +65,24 @@ test('syncData streams records, persists them, and records history', async () =>
   assert.equal(list.total, 3);
 
   const history = service.getSyncHistory();
-  assert.equal(history.length, 1);
-  assert.equal(history[0].vulnerabilities_count, 3);
-  assert.equal(history[0].vulnerabilities_remediated, 1);
-  assert.equal(history[0].remediations_count, 2);
+  // With verbose logging, we now have multiple history entries (start, batch, flush, complete, etc.)
+  assert.ok(history.length > 1, 'Should have multiple history entries with verbose logging');
+
+  // Check that we have the expected event types
+  const startEvents = history.filter(e => e.event_type === 'start');
+  const completeEvents = history.filter(e => e.event_type === 'complete');
+  assert.equal(startEvents.length, 1, 'Should have one start event');
+  assert.equal(completeEvents.length, 1, 'Should have one complete event');
+
+  // The complete event should have the final stats
+  const completeEvent = completeEvents[0];
+  assert.equal(completeEvent.vulnerabilities_count, 3);
+  assert.equal(completeEvent.vulnerabilities_remediated, 1);
+  assert.equal(completeEvent.remediations_count, 2);
+
+  // The old recordSyncHistory entry should also exist
+  const legacyEntry = history.find(e => !e.event_type && e.vulnerabilities_count === 3);
+  assert.ok(legacyEntry, 'Should have legacy sync history entry from recordSyncHistory');
 
   assert.equal(stateChanges[0], 'running');
   assert.equal(stateChanges.at(-1), 'idle');
