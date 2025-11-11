@@ -171,6 +171,9 @@ class DataService {
         remediated_count: vulnerabilitiesStats.remediated,
       });
 
+      // Record combined sync history
+      this.database.recordSyncHistory(vulnerabilityStats, remediationStats);
+
       return {
         vulnerabilities: vulnerabilitiesStats,
         remediations: remediationsStats,

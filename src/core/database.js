@@ -87,8 +87,18 @@ class VulnerabilityDatabase {
           raw_data = excluded.raw_data
       `),
       insertSync: this.db.prepare(`
-        INSERT INTO sync_history (sync_date, vulnerabilities_count, new_count, updated_count, remediated_count)
-        VALUES (@sync_date, @vulnerabilities_count, @new_count, @updated_count, @remediated_count)
+        INSERT INTO sync_history (
+          sync_date,
+          vulnerabilities_count, vulnerabilities_new, vulnerabilities_updated, vulnerabilities_remediated,
+          remediations_count, remediations_new, remediations_updated,
+          new_count, updated_count, remediated_count
+        )
+        VALUES (
+          @sync_date,
+          @vulnerabilities_count, @vulnerabilities_new, @vulnerabilities_updated, @vulnerabilities_remediated,
+          @remediations_count, @remediations_new, @remediations_updated,
+          @new_count, @updated_count, @remediated_count
+        )
       `),
     };
   }
@@ -144,6 +154,12 @@ class VulnerabilityDatabase {
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         sync_date TEXT NOT NULL,
         vulnerabilities_count INTEGER,
+        vulnerabilities_new INTEGER,
+        vulnerabilities_updated INTEGER,
+        vulnerabilities_remediated INTEGER,
+        remediations_count INTEGER,
+        remediations_new INTEGER,
+        remediations_updated INTEGER,
         new_count INTEGER,
         updated_count INTEGER,
         remediated_count INTEGER
@@ -241,14 +257,6 @@ class VulnerabilityDatabase {
         }
 
         this.statements.upsertVulnerability.run(payload);
-      });
-
-      this.statements.insertSync.run({
-        sync_date: now,
-        vulnerabilities_count: rows.length,
-        new_count: newCount,
-        updated_count: updatedCount,
-        remediated_count: remediatedCount,
       });
 
       return { new: newCount, updated: updatedCount, remediated: remediatedCount, total: rows.length };
@@ -540,9 +548,31 @@ class VulnerabilityDatabase {
     };
   }
 
+  recordSyncHistory(vulnerabilityStats, remediationStats) {
+    const now = dayjs().toISOString();
+    this.statements.insertSync.run({
+      sync_date: now,
+      vulnerabilities_count: vulnerabilityStats.total,
+      vulnerabilities_new: vulnerabilityStats.new,
+      vulnerabilities_updated: vulnerabilityStats.updated,
+      vulnerabilities_remediated: vulnerabilityStats.remediated,
+      remediations_count: remediationStats.total,
+      remediations_new: remediationStats.new,
+      remediations_updated: remediationStats.updated,
+      // Keep legacy columns for backward compatibility
+      new_count: vulnerabilityStats.new,
+      updated_count: vulnerabilityStats.updated,
+      remediated_count: vulnerabilityStats.remediated,
+    });
+  }
+
   getSyncHistory(limit = 20) {
     const stmt = this.db.prepare(`
-      SELECT sync_date, vulnerabilities_count, new_count, updated_count, remediated_count
+      SELECT
+        sync_date,
+        vulnerabilities_count, vulnerabilities_new, vulnerabilities_updated, vulnerabilities_remediated,
+        remediations_count, remediations_new, remediations_updated,
+        new_count, updated_count, remediated_count
       FROM sync_history
       ORDER BY sync_date DESC
       LIMIT ?

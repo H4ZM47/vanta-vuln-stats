@@ -20,7 +20,11 @@
         <button id="resumeSyncButton" class="secondary" style="display: none;">Resume</button>
         <button id="stopSyncButton" class="danger" style="display: none;">Stop</button>
       </div>
-      <span id="syncStatus" class="status"></span>
+      <div class="sync-status-container">
+        <span id="syncStatusVulnerabilities" class="status"></span>
+        <span id="syncStatusRemediations" class="status"></span>
+        <span id="syncStatusGeneral" class="status"></span>
+      </div>
     </div>
   </header>
 
@@ -58,21 +62,13 @@
       <article class="card">
         <header class="card__header">
           <h2>Sync History</h2>
-          <p>Recent sync operations and dataset changes.</p>
+          <p>Individual sync operations for vulnerabilities and remediations.</p>
         </header>
         <div class="card__body">
-          <table class="data-table">
-            <thead>
-              <tr>
-                <th>Date</th>
-                <th>Total</th>
-                <th>New</th>
-                <th>Updated</th>
-                <th>Remediated</th>
-              </tr>
-            </thead>
-            <tbody id="syncHistoryBody"></tbody>
-          </table>
+          <div id="syncHistoryLog" class="sync-history-log"></div>
+          <div id="syncHistoryEmpty" class="sync-history-empty" style="display: none;">
+            No syncs have been recorded.
+          </div>
         </div>
       </article>
     </section>
