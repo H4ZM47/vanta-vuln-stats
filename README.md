@@ -59,7 +59,15 @@ Electron Builder is pre-configured for packaging. Run one of the following comma
   npm run dist
   ```
 
-Refer to the [Electron Builder documentation](https://www.electron.build/) for customizing icons, signing, and advanced packaging options.
+#### Creating a macOS `.app` bundle
+
+To generate the macOS application bundle (`Vanta Vulnerability Stats.app`) run the dedicated packaging script on a macOS host:
+
+```bash
+npm run package:mac
+```
+
+This command emits the unsigned `.app` bundle to `dist/mac/`. Because Electron Builder cannot cross-compile macOS applications from Windows or Linux, the script must be executed on macOS (you can still run `npm install` on other platforms beforehand). If you need to notarize or code-sign the build, supply the appropriate environment variables documented in the [Electron Builder macOS guide](https://www.electron.build/code-signing#macos). Refer to the broader [Electron Builder documentation](https://www.electron.build/) for customizing icons, signing, and advanced packaging options.
 
 ## Application Architecture
 
