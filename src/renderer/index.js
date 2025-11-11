@@ -490,6 +490,9 @@ const handleColumnSort = async (event) => {
   // Reset to first page when sorting changes
   state.page = 1;
 
+  // Update indicators immediately for responsive UI
+  renderSortIndicators();
+
   await loadVulnerabilities();
   resetDetails();
 };

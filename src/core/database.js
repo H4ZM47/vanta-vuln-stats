@@ -482,6 +482,18 @@ class VulnerabilityDatabase {
       // For status, sort by whether deactivated_on is null (Active vs Remediated)
       // NULL first means Active first when DESC, Remediated first when ASC
       orderBy = `ORDER BY (deactivated_on IS NULL) ${direction}, name ASC`;
+    } else if (sortColumn === 'severity') {
+      // For severity, use explicit ordering: CRITICAL→HIGH→MEDIUM→LOW→INFO→UNKNOWN
+      orderBy = `ORDER BY
+        CASE severity
+          WHEN 'CRITICAL' THEN 1
+          WHEN 'HIGH' THEN 2
+          WHEN 'MEDIUM' THEN 3
+          WHEN 'LOW' THEN 4
+          WHEN 'INFO' THEN 5
+          ELSE 6
+        END ${direction},
+        name ASC`;
     } else {
       // Handle NULL values properly - put them at the end
       orderBy = `ORDER BY (${actualColumn} IS NULL), ${actualColumn} ${direction}, name ASC`;
