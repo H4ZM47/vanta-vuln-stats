@@ -14,7 +14,12 @@
       <p class="subtitle">Synchronize vulnerabilities from the Vanta API and explore rich statistics locally.</p>
     </div>
     <div class="header-actions">
-      <button id="syncButton" class="primary">Run Sync</button>
+      <div class="sync-controls">
+        <button id="startSyncButton" class="primary">Start Sync</button>
+        <button id="pauseSyncButton" class="secondary" style="display: none;">Pause</button>
+        <button id="resumeSyncButton" class="secondary" style="display: none;">Resume</button>
+        <button id="stopSyncButton" class="danger" style="display: none;">Stop</button>
+      </div>
       <span id="syncStatus" class="status"></span>
     </div>
   </header>

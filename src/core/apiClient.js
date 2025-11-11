@@ -65,6 +65,11 @@ class VantaApiClient {
       try {
         return await this.http.request(config);
       } catch (error) {
+        // Check if request was aborted
+        if (error.name === 'AbortError' || error.code === 'ERR_CANCELED') {
+          throw error;
+        }
+
         const status = error?.response?.status;
         if (status === 401 && attempt < retries) {
           await this.authenticate(true);
