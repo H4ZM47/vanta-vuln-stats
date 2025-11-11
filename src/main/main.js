@@ -1,5 +1,5 @@
 const path = require('path');
-const { app, BrowserWindow, ipcMain } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog } = require('electron');
 const { DataService } = require('./dataService');
 
 let mainWindow;
@@ -51,6 +51,38 @@ ipcMain.handle('remediations:list', (event, vulnerabilityId) => dataService.getR
 
 ipcMain.handle('sync:history', () => dataService.getSyncHistory());
 ipcMain.handle('database:path', () => dataService.getDatabasePath());
+
+ipcMain.handle('database:select', async () => {
+  if (!mainWindow) {
+    throw new Error('Application window is not ready.');
+  }
+
+  const result = await dialog.showOpenDialog(mainWindow, {
+    title: 'Select Database File',
+    buttonLabel: 'Select',
+    filters: [
+      { name: 'SQLite Database', extensions: ['db', 'sqlite', 'sqlite3'] },
+      { name: 'All Files', extensions: ['*'] }
+    ],
+    properties: ['openFile']
+  });
+
+  if (result.canceled || result.filePaths.length === 0) {
+    return null;
+  }
+
+  return result.filePaths[0];
+});
+
+ipcMain.handle('database:set-path', async (event, filePath) => {
+  await dataService.setDatabasePath(filePath);
+  return dataService.getDatabasePath();
+});
+
+ipcMain.handle('database:reset-path', async () => {
+  await dataService.resetDatabasePath();
+  return dataService.getDatabasePath();
+});
 
 ipcMain.handle('sync:run', async () => {
   if (!mainWindow) {

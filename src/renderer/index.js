@@ -57,6 +57,9 @@ const elements = {
 
   // Database
   databasePath: document.getElementById('databasePath'),
+  selectDatabaseButton: document.getElementById('selectDatabaseButton'),
+  resetDatabaseButton: document.getElementById('resetDatabaseButton'),
+  databaseStatus: document.getElementById('databaseStatus'),
 };
 
 const defaultFilters = () => ({
@@ -817,6 +820,73 @@ const attachEventListeners = () => {
     setTimeout(() => {
       elements.credentialsStatus.textContent = '';
     }, 2500);
+  });
+
+  elements.selectDatabaseButton.addEventListener('click', async () => {
+    try {
+      const selectedPath = await window.vanta.selectDatabaseFile();
+
+      if (!selectedPath) {
+        // User cancelled the dialog
+        return;
+      }
+
+      elements.databaseStatus.textContent = 'Changing database location...';
+      elements.databaseStatus.style.display = 'block';
+      elements.databaseStatus.className = 'status-message status-info';
+
+      const newPath = await window.vanta.setDatabasePath(selectedPath);
+      elements.databasePath.textContent = newPath;
+
+      elements.databaseStatus.textContent = 'Database location updated successfully. Reload the data to see changes.';
+      elements.databaseStatus.className = 'status-message status-success';
+
+      // Reload statistics and vulnerabilities with the new database
+      await Promise.all([loadStatistics(), loadVulnerabilities(), loadSyncHistory()]);
+
+      setTimeout(() => {
+        elements.databaseStatus.style.display = 'none';
+        elements.databaseStatus.textContent = '';
+      }, 5000);
+    } catch (error) {
+      elements.databaseStatus.textContent = `Failed to change database: ${error.message}`;
+      elements.databaseStatus.className = 'status-message status-error';
+      elements.databaseStatus.style.display = 'block';
+      setTimeout(() => {
+        elements.databaseStatus.style.display = 'none';
+        elements.databaseStatus.textContent = '';
+      }, 5000);
+    }
+  });
+
+  elements.resetDatabaseButton.addEventListener('click', async () => {
+    try {
+      elements.databaseStatus.textContent = 'Resetting to default database location...';
+      elements.databaseStatus.style.display = 'block';
+      elements.databaseStatus.className = 'status-message status-info';
+
+      const newPath = await window.vanta.resetDatabasePath();
+      elements.databasePath.textContent = newPath;
+
+      elements.databaseStatus.textContent = 'Database location reset to default. Reload the data to see changes.';
+      elements.databaseStatus.className = 'status-message status-success';
+
+      // Reload statistics and vulnerabilities with the default database
+      await Promise.all([loadStatistics(), loadVulnerabilities(), loadSyncHistory()]);
+
+      setTimeout(() => {
+        elements.databaseStatus.style.display = 'none';
+        elements.databaseStatus.textContent = '';
+      }, 5000);
+    } catch (error) {
+      elements.databaseStatus.textContent = `Failed to reset database: ${error.message}`;
+      elements.databaseStatus.className = 'status-message status-error';
+      elements.databaseStatus.style.display = 'block';
+      setTimeout(() => {
+        elements.databaseStatus.style.display = 'none';
+        elements.databaseStatus.textContent = '';
+      }, 5000);
+    }
   });
 
   elements.startSyncButton.addEventListener('click', async () => {

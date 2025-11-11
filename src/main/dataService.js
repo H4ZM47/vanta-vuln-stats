@@ -64,9 +64,10 @@ class DataService {
       userDataPath ??
       (this.app?.getPath ? this.app.getPath('userData') : path.join(process.cwd(), 'user-data'));
 
-    this.databasePath = databasePath ?? path.join(defaultUserDataPath, 'storage', 'vanta_vulnerabilities.db');
-    const createDatabase = databaseFactory ?? ((filePath) => new VulnerabilityDatabase(filePath));
-    this.database = createDatabase(this.databasePath);
+    this.defaultDatabasePath = path.join(defaultUserDataPath, 'storage', 'vanta_vulnerabilities.db');
+    this.databasePath = databasePath ?? this.defaultDatabasePath;
+    this.createDatabase = databaseFactory ?? ((filePath) => new VulnerabilityDatabase(filePath));
+    this.database = this.createDatabase(this.databasePath);
     this.createApiClient = apiClientFactory ?? ((credentials) => new VantaApiClient(credentials));
     this.batchSize = batchSize ?? 1000;
     this.activeSync = null;
@@ -432,6 +433,38 @@ class DataService {
 
   getDatabasePath() {
     return this.databasePath;
+  }
+
+  /**
+   * Sets a new database path and reconnects to the database.
+   *
+   * @param {string} newPath - The new database file path
+   * @throws {Error} If a sync is currently in progress
+   */
+  async setDatabasePath(newPath) {
+    if (this.syncState.state !== 'idle') {
+      throw new Error('Cannot change database while a sync is in progress');
+    }
+
+    // Close the existing database connection
+    if (this.database && typeof this.database.close === 'function') {
+      this.database.close();
+    }
+
+    // Update the path and create a new database connection
+    this.databasePath = newPath;
+    this.database = this.createDatabase(this.databasePath);
+
+    return this.databasePath;
+  }
+
+  /**
+   * Resets the database path to the default location.
+   *
+   * @throws {Error} If a sync is currently in progress
+   */
+  async resetDatabasePath() {
+    return this.setDatabasePath(this.defaultDatabasePath);
   }
 }
 
