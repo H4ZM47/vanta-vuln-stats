@@ -595,7 +595,12 @@ class VulnerabilityDatabase {
     });
   }
 
-  getSyncHistory(limit = 20) {
+  getSyncHistory(limit = 100000) {
+    const MAX_HISTORY = 100000;
+    const requested = Number(limit);
+    const safeLimit = Number.isFinite(requested) ? requested : MAX_HISTORY;
+    const finalLimit = Math.min(Math.max(safeLimit, 1), MAX_HISTORY);
+
     const stmt = this.db.prepare(`
       SELECT
         sync_date,
@@ -606,7 +611,7 @@ class VulnerabilityDatabase {
       ORDER BY sync_date DESC
       LIMIT ?
     `);
-    return stmt.all(limit);
+    return stmt.all(finalLimit);
   }
 }
 

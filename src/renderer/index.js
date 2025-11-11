@@ -57,10 +57,6 @@ const state = {
   vulnerabilities: [],
   selectedId: null,
   syncState: 'idle', // idle, running, paused, stopping
-  currentSync: {
-    vulnerabilities: { count: 0, status: 'idle' }, // idle, syncing, completed
-    remediations: { count: 0, status: 'idle' },
-  },
 };
 
 const toISODate = (value) => {
@@ -177,129 +173,55 @@ const renderStatistics = (stats) => {
 };
 
 const renderSyncHistory = (history) => {
-  if (!history?.length) {
-    elements.syncHistoryLog.style.display = 'none';
-    elements.syncHistoryEmpty.style.display = 'block';
+  const hasHistory = Array.isArray(history) && history.length > 0;
+
+  elements.syncHistoryLog.style.display = hasHistory ? 'flex' : 'none';
+  elements.syncHistoryEmpty.style.display = hasHistory ? 'none' : 'block';
+
+  if (!hasHistory) {
+    elements.syncHistoryLog.innerHTML = '';
     return;
   }
 
-  elements.syncHistoryLog.style.display = 'flex';
-  elements.syncHistoryEmpty.style.display = 'none';
-
-  elements.syncHistoryLog.innerHTML = history
+  const orderedHistory = [...history].reverse();
+  elements.syncHistoryLog.innerHTML = orderedHistory
     .map((item) => {
-      const hasVulnData = item.vulnerabilities_count !== undefined && item.vulnerabilities_count !== null;
-      const hasRemData = item.remediations_count !== undefined && item.remediations_count !== null;
+      const timestamp = formatDateTime(item.sync_date);
+      const segments = [];
 
-      const vulnStats = hasVulnData ? `
-        <div class="sync-history-stat">
-          <span class="sync-history-stat-label">Total:</span>
-          <span class="sync-history-stat-value">${formatNumber(item.vulnerabilities_count)}</span>
-        </div>
-        <div class="sync-history-stat">
-          <span class="sync-history-stat-label">New:</span>
-          <span class="sync-history-stat-value">${formatNumber(item.vulnerabilities_new || 0)}</span>
-        </div>
-        <div class="sync-history-stat">
-          <span class="sync-history-stat-label">Updated:</span>
-          <span class="sync-history-stat-value">${formatNumber(item.vulnerabilities_updated || 0)}</span>
-        </div>
-        <div class="sync-history-stat">
-          <span class="sync-history-stat-label">Remediated:</span>
-          <span class="sync-history-stat-value">${formatNumber(item.vulnerabilities_remediated || 0)}</span>
-        </div>
-      ` : '';
+      if (item.vulnerabilities_count !== undefined && item.vulnerabilities_count !== null) {
+        const vulnParts = [
+          `total ${formatNumber(item.vulnerabilities_count)}`,
+          `new ${formatNumber(item.vulnerabilities_new || 0)}`,
+          `updated ${formatNumber(item.vulnerabilities_updated || 0)}`,
+        ];
+        if (item.vulnerabilities_remediated !== undefined && item.vulnerabilities_remediated !== null) {
+          vulnParts.push(`remediated ${formatNumber(item.vulnerabilities_remediated || 0)}`);
+        }
+        segments.push(`Vulnerabilities ${vulnParts.join(', ')}`);
+      }
 
-      const remStats = hasRemData ? `
-        <div class="sync-history-stat">
-          <span class="sync-history-stat-label">Total:</span>
-          <span class="sync-history-stat-value">${formatNumber(item.remediations_count)}</span>
-        </div>
-        <div class="sync-history-stat">
-          <span class="sync-history-stat-label">New:</span>
-          <span class="sync-history-stat-value">${formatNumber(item.remediations_new || 0)}</span>
-        </div>
-        <div class="sync-history-stat">
-          <span class="sync-history-stat-label">Updated:</span>
-          <span class="sync-history-stat-value">${formatNumber(item.remediations_updated || 0)}</span>
-        </div>
-      ` : '';
+      if (item.remediations_count !== undefined && item.remediations_count !== null) {
+        const remParts = [
+          `total ${formatNumber(item.remediations_count)}`,
+          `new ${formatNumber(item.remediations_new || 0)}`,
+          `updated ${formatNumber(item.remediations_updated || 0)}`,
+        ];
+        segments.push(`Remediations ${remParts.join(', ')}`);
+      }
+
+      const message = segments.length ? `Sync completed — ${segments.join(' | ')}` : 'Sync completed.';
 
       return `
-        <div class="sync-history-item completed">
-          <div class="sync-history-header">
-            <div class="sync-history-title">Sync Completed</div>
-            <div class="sync-history-time">${formatDateTime(item.sync_date)}</div>
-          </div>
-          ${hasVulnData ? `
-            <div style="margin-bottom: 0.5rem; font-weight: 600; color: rgba(148, 163, 184, 0.9); font-size: 0.85rem;">
-              Vulnerabilities
-            </div>
-            <div class="sync-history-stats">
-              ${vulnStats}
-            </div>
-          ` : ''}
-          ${hasRemData ? `
-            <div style="margin-top: 0.75rem; margin-bottom: 0.5rem; font-weight: 600; color: rgba(148, 163, 184, 0.9); font-size: 0.85rem;">
-              Remediations
-            </div>
-            <div class="sync-history-stats">
-              ${remStats}
-            </div>
-          ` : ''}
+        <div class="sync-log-line">
+          <span class="sync-log-timestamp">[${timestamp}]</span>
+          <span class="sync-log-message">${message}</span>
         </div>
       `;
     })
     .join('');
-};
 
-const addLiveSyncItem = () => {
-  elements.syncHistoryLog.style.display = 'flex';
-  elements.syncHistoryEmpty.style.display = 'none';
-
-  const liveItem = document.createElement('div');
-  liveItem.className = 'sync-history-item in-progress';
-  liveItem.id = 'live-sync-item';
-  liveItem.innerHTML = `
-    <div class="sync-history-header">
-      <div class="sync-history-title">Sync In Progress</div>
-      <div class="sync-history-time">Now</div>
-    </div>
-    <div style="margin-bottom: 0.5rem; font-weight: 600; color: rgba(148, 163, 184, 0.9); font-size: 0.85rem;">
-      Vulnerabilities
-    </div>
-    <div class="sync-history-stats" id="live-vuln-stats">
-      <div class="sync-history-stat">
-        <span class="sync-history-stat-label">Processing:</span>
-        <span class="sync-history-stat-value" id="live-vuln-count">0</span>
-      </div>
-    </div>
-    <div style="margin-top: 0.75rem; margin-bottom: 0.5rem; font-weight: 600; color: rgba(148, 163, 184, 0.9); font-size: 0.85rem;">
-      Remediations
-    </div>
-    <div class="sync-history-stats" id="live-rem-stats">
-      <div class="sync-history-stat">
-        <span class="sync-history-stat-label">Processing:</span>
-        <span class="sync-history-stat-value" id="live-rem-count">0</span>
-      </div>
-    </div>
-  `;
-
-  elements.syncHistoryLog.insertBefore(liveItem, elements.syncHistoryLog.firstChild);
-};
-
-const updateLiveSyncItem = (type, count) => {
-  const countElement = document.getElementById(type === 'vulnerabilities' ? 'live-vuln-count' : 'live-rem-count');
-  if (countElement) {
-    countElement.textContent = formatNumber(count);
-  }
-};
-
-const removeLiveSyncItem = () => {
-  const liveItem = document.getElementById('live-sync-item');
-  if (liveItem) {
-    liveItem.remove();
-  }
+  elements.syncHistoryLog.scrollTop = elements.syncHistoryLog.scrollHeight;
 };
 
 const renderVulnerabilities = () => {
@@ -463,22 +385,15 @@ const attachEventListeners = () => {
     if (state.syncState !== 'idle') {
       return;
     }
-    state.currentSync = {
-      vulnerabilities: { count: 0, status: 'syncing' },
-      remediations: { count: 0, status: 'syncing' },
-    };
     elements.syncStatusGeneral.textContent = 'Starting sync…';
     elements.syncStatusVulnerabilities.textContent = '';
     elements.syncStatusRemediations.textContent = '';
-
-    addLiveSyncItem();
 
     try {
       await window.vanta.runSync();
     } catch (error) {
       elements.syncStatusGeneral.textContent = `Sync failed: ${error.message}`;
       updateSyncButtons('idle');
-      removeLiveSyncItem();
     }
   });
 
@@ -553,18 +468,12 @@ const attachEventListeners = () => {
   });
 
   window.vanta.onSyncProgress(({ type, count }) => {
-    state.currentSync[type].count = count;
-    state.currentSync[type].status = 'syncing';
-
     // Update header status
     if (type === 'vulnerabilities') {
       elements.syncStatusVulnerabilities.textContent = `Vulnerabilities: ${formatNumber(count)} processed`;
     } else if (type === 'remediations') {
       elements.syncStatusRemediations.textContent = `Remediations: ${formatNumber(count)} processed`;
     }
-
-    // Update live sync item in history log
-    updateLiveSyncItem(type, count);
   });
 
   window.vanta.onSyncIncremental(async ({ type, stats, flushed }) => {
@@ -580,11 +489,7 @@ const attachEventListeners = () => {
 
   window.vanta.onSyncCompleted(async () => {
     elements.syncStatusGeneral.textContent = 'Sync complete! Refreshing data…';
-    state.currentSync.vulnerabilities.status = 'completed';
-    state.currentSync.remediations.status = 'completed';
     updateSyncButtons('idle');
-
-    removeLiveSyncItem();
 
     await Promise.all([loadStatistics(), loadVulnerabilities(), loadSyncHistory()]);
 
@@ -601,7 +506,6 @@ const attachEventListeners = () => {
     elements.syncStatusVulnerabilities.textContent = '';
     elements.syncStatusRemediations.textContent = '';
     updateSyncButtons('idle');
-    removeLiveSyncItem();
   });
 };
 
