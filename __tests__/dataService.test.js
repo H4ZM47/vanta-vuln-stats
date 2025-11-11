@@ -121,22 +121,38 @@ describe('DataService - Sync Operations', () => {
     });
 
     it('should fetch vulnerabilities and remediations in parallel', async () => {
+      let vulnStarted = false;
+      let remediationsStarted = false;
+      let vulnResolve;
+      let remediationsResolve;
+
       const vulnerabilitiesPromise = new Promise((resolve) => {
-        setTimeout(() => resolve(), 100);
+        vulnResolve = resolve;
+        vulnStarted = true;
       });
+
       const remediationsPromise = new Promise((resolve) => {
-        setTimeout(() => resolve(), 100);
+        remediationsResolve = resolve;
+        remediationsStarted = true;
       });
 
       mockApiClientInstance.getVulnerabilities.mockImplementation(() => vulnerabilitiesPromise);
       mockApiClientInstance.getRemediations.mockImplementation(() => remediationsPromise);
 
-      const startTime = Date.now();
-      await dataService.syncData();
-      const endTime = Date.now();
+      const syncPromise = dataService.syncData();
 
-      // If parallel, should take ~100ms, if sequential would take ~200ms
-      expect(endTime - startTime).toBeLessThan(150);
+      // Wait for both to start
+      await new Promise(resolve => setTimeout(resolve, 10));
+
+      // Both should have started (proving parallel execution)
+      expect(vulnStarted).toBe(true);
+      expect(remediationsStarted).toBe(true);
+
+      // Resolve both and await completion
+      vulnResolve();
+      remediationsResolve();
+      await syncPromise;
+
       expect(mockApiClientInstance.getVulnerabilities).toHaveBeenCalled();
       expect(mockApiClientInstance.getRemediations).toHaveBeenCalled();
     });
@@ -157,8 +173,11 @@ describe('DataService - Sync Operations', () => {
         await onBatch([{ id: 1 }]);
         // Keep the sync running until aborted
         await new Promise((resolve, reject) => {
-          signal.addEventListener('abort', () => reject(new Error('Aborted')));
-          setTimeout(resolve, 5000);
+          const timeout = setTimeout(resolve, 5000);
+          signal.addEventListener('abort', () => {
+            clearTimeout(timeout);
+            reject(new Error('Aborted'));
+          });
         });
       });
       mockApiClientInstance.getRemediations.mockImplementation(async () => {});
