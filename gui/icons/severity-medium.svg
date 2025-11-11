@@ -1,6 +1,0 @@
-<svg width="24" height="24" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Medium severity">
-  <title>Medium severity</title>
-  <path d="M12 2 L22 12 L12 22 L2 12 Z" fill="#FFC107" />
-  <rect x="11" y="8" width="2" height="8" rx="1" fill="#4A4A4A" />
-  <rect x="11" y="17" width="2" height="2" rx="1" fill="#4A4A4A" />
-</svg>
