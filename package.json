@@ -8,7 +8,8 @@
     "lint": "echo 'No linting configured'",
     "postinstall": "electron-builder install-app-deps",
     "pack": "electron-builder --dir",
-    "dist": "electron-builder"
+    "dist": "electron-builder",
+    "package:mac": "electron-builder --mac dir"
   },
   "author": "",
   "license": "MIT",
@@ -21,5 +22,26 @@
     "better-sqlite3": "^12.4.1",
     "dayjs": "^1.11.10",
     "electron-store": "^8.1.0"
+  },
+  "build": {
+    "appId": "com.vanta.vulnstats",
+    "productName": "Vanta Vulnerability Stats",
+    "asar": true,
+    "files": [
+      "**/*",
+      "!dist/**/*"
+    ],
+    "mac": {
+      "category": "public.app-category.developer-tools",
+      "target": [
+        "dir"
+      ]
+    },
+    "directories": {
+      "output": "dist"
+    },
+    "extraMetadata": {
+      "main": "src/main/main.js"
+    }
   }
 }
