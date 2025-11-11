@@ -44,12 +44,67 @@ main {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 2.5rem 0 1.5rem;
+  padding: 2.5rem 0 1rem;
 }
 
 .subtitle {
   color: rgba(226, 232, 240, 0.75);
   max-width: 720px;
+}
+
+.tab-navigation {
+  display: flex;
+  gap: 0.5rem;
+  padding: 0 0 1.5rem 0;
+  border-bottom: 2px solid rgba(148, 163, 184, 0.12);
+  margin-bottom: 1.5rem;
+}
+
+.tab-button {
+  border: none;
+  border-radius: 12px 12px 0 0;
+  padding: 0.75rem 1.5rem;
+  font-size: 0.95rem;
+  font-weight: 500;
+  cursor: pointer;
+  background: rgba(148, 163, 184, 0.08);
+  color: rgba(226, 232, 240, 0.6);
+  transition: all 0.2s ease;
+  position: relative;
+}
+
+.tab-button:hover {
+  background: rgba(148, 163, 184, 0.15);
+  color: rgba(226, 232, 240, 0.85);
+  transform: none;
+  box-shadow: none;
+}
+
+.tab-button.active {
+  background: linear-gradient(145deg, rgba(56, 189, 248, 0.15), rgba(14, 165, 233, 0.12));
+  color: var(--color-accent);
+  font-weight: 600;
+  border-bottom: 3px solid var(--color-accent);
+}
+
+.tab-button.active::after {
+  content: '';
+  position: absolute;
+  bottom: -2px;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: var(--color-accent);
+}
+
+.tab-content {
+  display: none;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.tab-content.active {
+  display: flex;
 }
 
 .header-actions {
@@ -416,10 +471,39 @@ select[multiple] {
   font-weight: 600;
 }
 
+.database-location {
+  background: rgba(15, 23, 42, 0.5);
+  padding: 1rem;
+  border-radius: 12px;
+  border: 1px solid rgba(148, 163, 184, 0.15);
+  font-family: 'SFMono-Regular', 'Roboto Mono', Menlo, Consolas, monospace;
+  font-size: 0.85rem;
+  word-break: break-all;
+}
+
+.database-location strong {
+  color: rgba(148, 163, 184, 0.85);
+  display: block;
+  margin-bottom: 0.5rem;
+}
+
+.database-location span {
+  color: var(--color-accent);
+}
+
+.report-form {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
 .app-footer {
   margin-top: 2rem;
+  padding-top: 1.5rem;
+  border-top: 1px solid rgba(148, 163, 184, 0.12);
   color: rgba(148, 163, 184, 0.6);
   font-size: 0.85rem;
+  text-align: center;
 }
 
 @media (max-width: 900px) {

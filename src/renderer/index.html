@@ -13,44 +13,16 @@
       <h1>Vanta Vulnerability Dashboard</h1>
       <p class="subtitle">Synchronize vulnerabilities from the Vanta API and explore rich statistics locally.</p>
     </div>
-    <div class="header-actions">
-      <div class="sync-controls">
-        <button id="startSyncButton" class="primary">Start Sync</button>
-        <button id="pauseSyncButton" class="secondary" style="display: none;">Pause</button>
-        <button id="resumeSyncButton" class="secondary" style="display: none;">Resume</button>
-        <button id="stopSyncButton" class="danger" style="display: none;">Stop</button>
-      </div>
-      <div class="sync-status-container">
-        <span id="syncStatusVulnerabilities" class="status"></span>
-        <span id="syncStatusRemediations" class="status"></span>
-        <span id="syncStatusGeneral" class="status"></span>
-      </div>
-    </div>
   </header>
 
-  <main>
-    <section class="card">
-      <header class="card__header">
-        <h2>API Credentials</h2>
-        <p>Provide a Vanta API client configured with the <code>vanta-api.all:read</code> scope.</p>
-      </header>
-      <div class="card__body form-grid">
-        <label>
-          <span>Client ID</span>
-          <input id="clientId" type="text" placeholder="Enter client ID" />
-        </label>
-        <label>
-          <span>Client Secret</span>
-          <input id="clientSecret" type="password" placeholder="Enter client secret" />
-        </label>
-        <div class="form-actions">
-          <button id="saveCredentials" class="secondary">Save Credentials</button>
-          <span id="credentialsStatus" class="status"></span>
-        </div>
-      </div>
-    </section>
+  <nav class="tab-navigation">
+    <button class="tab-button active" data-tab="vulnerabilities">Vulnerabilities & Remediations</button>
+    <button class="tab-button" data-tab="settings">Settings & Sync</button>
+  </nav>
 
-    <section class="grid two-columns">
+  <main>
+    <!-- Tab 1: Vulnerabilities & Remediations -->
+    <div id="vulnerabilitiesTab" class="tab-content active">
       <article class="card">
         <header class="card__header">
           <h2>Current Statistics</h2>
@@ -58,6 +30,230 @@
         </header>
         <div class="card__body" id="statistics"></div>
       </article>
+
+      <section class="card">
+        <header class="card__header">
+          <h2>Vulnerability Explorer</h2>
+          <p>Filter, browse, and inspect synchronized vulnerabilities.</p>
+        </header>
+        <div class="card__body">
+          <form id="filters" class="filters">
+            <div class="filter-group">
+              <label>
+                <span>Severity</span>
+                <select id="severity" multiple>
+                  <option value="CRITICAL">Critical</option>
+                  <option value="HIGH">High</option>
+                  <option value="MEDIUM">Medium</option>
+                  <option value="LOW">Low</option>
+                </select>
+              </label>
+            </div>
+            <div class="filter-group">
+              <label>
+                <span>Status</span>
+                <select id="status">
+                  <option value="all">All</option>
+                  <option value="active">Active</option>
+                  <option value="deactivated">Remediated</option>
+                </select>
+              </label>
+            </div>
+            <div class="filter-group">
+              <label>
+                <span>Fixability</span>
+                <select id="fixable">
+                  <option value="any">Any</option>
+                  <option value="fixable">Fixable</option>
+                  <option value="not_fixable">Not Fixable</option>
+                </select>
+              </label>
+            </div>
+            <div class="filter-group">
+              <label>
+                <span>Integration</span>
+                <input id="integration" type="text" placeholder="Integration ID" />
+              </label>
+            </div>
+            <div class="filter-group">
+              <label>
+                <span>Asset ID</span>
+                <input id="assetId" type="text" placeholder="Asset identifier" />
+              </label>
+            </div>
+            <div class="filter-group">
+              <label>
+                <span>CVE / Name</span>
+                <input id="cve" type="text" placeholder="Search CVE or name" />
+              </label>
+            </div>
+            <div class="filter-group">
+              <label>
+                <span>Detected From</span>
+                <input id="dateIdentifiedStart" type="date" />
+              </label>
+            </div>
+            <div class="filter-group">
+              <label>
+                <span>Detected To</span>
+                <input id="dateIdentifiedEnd" type="date" />
+              </label>
+            </div>
+            <div class="filter-group">
+              <label>
+                <span>Remediated From</span>
+                <input id="dateRemediatedStart" type="date" />
+              </label>
+            </div>
+            <div class="filter-group">
+              <label>
+                <span>Remediated To</span>
+                <input id="dateRemediatedEnd" type="date" />
+              </label>
+            </div>
+            <div class="filter-actions">
+              <button type="submit" class="secondary">Apply Filters</button>
+              <button type="button" id="clearFilters" class="link">Clear</button>
+            </div>
+          </form>
+
+          <div class="table-wrapper">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th class="sortable" data-column="id">ID <span class="sort-indicator"></span></th>
+                  <th class="sortable" data-column="name">Name <span class="sort-indicator"></span></th>
+                  <th class="sortable" data-column="severity">Severity <span class="sort-indicator"></span></th>
+                  <th class="sortable" data-column="integration_id">Integration <span class="sort-indicator"></span></th>
+                  <th class="sortable" data-column="target_id">Asset <span class="sort-indicator"></span></th>
+                  <th class="sortable" data-column="first_detected">Detected <span class="sort-indicator"></span></th>
+                  <th class="sortable" data-column="status">Status <span class="sort-indicator"></span></th>
+                </tr>
+              </thead>
+              <tbody id="vulnerabilityTable"></tbody>
+            </table>
+          </div>
+          <div class="table-footer">
+            <span id="paginationStatus"></span>
+            <div class="pagination-controls">
+              <button id="prevPage" class="secondary">Previous</button>
+              <button id="nextPage" class="secondary">Next</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="card">
+        <header class="card__header">
+          <h2>Details</h2>
+          <p id="detailsSubtitle">Select a vulnerability to inspect its full payload and remediation history.</p>
+        </header>
+        <div class="card__body details">
+          <div>
+            <h3>Vulnerability Payload</h3>
+            <pre id="vulnerabilityDetails" class="code-block">No vulnerability selected.</pre>
+          </div>
+          <div>
+            <h3>Remediations</h3>
+            <pre id="remediationDetails" class="code-block">No vulnerability selected.</pre>
+          </div>
+        </div>
+      </section>
+
+      <section class="card">
+        <header class="card__header">
+          <h2>Generate Report</h2>
+          <p>Export vulnerability data as a formatted report.</p>
+        </header>
+        <div class="card__body">
+          <form id="reportForm" class="report-form">
+            <div class="form-grid">
+              <label>
+                <span>Report Format</span>
+                <select id="reportFormat">
+                  <option value="csv">CSV (Comma-Separated Values)</option>
+                  <option value="json">JSON (JavaScript Object Notation)</option>
+                  <option value="html">HTML (Web Page)</option>
+                </select>
+              </label>
+              <label>
+                <span>Include Remediations</span>
+                <select id="includeRemediations">
+                  <option value="yes">Yes</option>
+                  <option value="no">No</option>
+                </select>
+              </label>
+              <label>
+                <span>Apply Current Filters</span>
+                <select id="applyFilters">
+                  <option value="yes">Yes (use current filter settings)</option>
+                  <option value="no">No (export all vulnerabilities)</option>
+                </select>
+              </label>
+            </div>
+            <div class="form-actions">
+              <button type="submit" class="primary">Generate Report</button>
+              <span id="reportStatus" class="status"></span>
+            </div>
+          </form>
+        </div>
+      </section>
+    </div>
+
+    <!-- Tab 2: Settings & Sync -->
+    <div id="settingsTab" class="tab-content" style="display: none;">
+      <section class="card">
+        <header class="card__header">
+          <h2>API Credentials</h2>
+          <p>Provide a Vanta API client configured with the <code>vanta-api.all:read</code> scope.</p>
+        </header>
+        <div class="card__body form-grid">
+          <label>
+            <span>Client ID</span>
+            <input id="clientId" type="text" placeholder="Enter client ID" />
+          </label>
+          <label>
+            <span>Client Secret</span>
+            <input id="clientSecret" type="password" placeholder="Enter client secret" />
+          </label>
+          <div class="form-actions">
+            <button id="saveCredentials" class="secondary">Save Credentials</button>
+            <span id="credentialsStatus" class="status"></span>
+          </div>
+        </div>
+      </section>
+
+      <section class="card">
+        <header class="card__header">
+          <h2>Database Configuration</h2>
+          <p>Location where vulnerability data is stored locally.</p>
+        </header>
+        <div class="card__body">
+          <p class="database-location">
+            <strong>Current location:</strong> <span id="databasePath">Loading...</span>
+          </p>
+        </div>
+      </section>
+
+      <section class="card">
+        <header class="card__header">
+          <h2>Sync Operations</h2>
+          <p>Control data synchronization from the Vanta API.</p>
+        </header>
+        <div class="card__body">
+          <div class="sync-controls">
+            <button id="startSyncButton" class="primary">Start Sync</button>
+            <button id="pauseSyncButton" class="secondary" style="display: none;">Pause</button>
+            <button id="resumeSyncButton" class="secondary" style="display: none;">Resume</button>
+            <button id="stopSyncButton" class="danger" style="display: none;">Stop</button>
+          </div>
+          <div class="sync-status-container">
+            <span id="syncStatusVulnerabilities" class="status"></span>
+            <span id="syncStatusRemediations" class="status"></span>
+            <span id="syncStatusGeneral" class="status"></span>
+          </div>
+        </div>
+      </section>
 
       <article class="card">
         <header class="card__header">
@@ -71,140 +267,11 @@
           </div>
         </div>
       </article>
-    </section>
-
-    <section class="card">
-      <header class="card__header">
-        <h2>Vulnerability Explorer</h2>
-        <p>Filter, browse, and inspect synchronized vulnerabilities.</p>
-      </header>
-      <div class="card__body">
-        <form id="filters" class="filters">
-          <div class="filter-group">
-            <label>
-              <span>Severity</span>
-              <select id="severity" multiple>
-                <option value="CRITICAL">Critical</option>
-                <option value="HIGH">High</option>
-                <option value="MEDIUM">Medium</option>
-                <option value="LOW">Low</option>
-              </select>
-            </label>
-          </div>
-          <div class="filter-group">
-            <label>
-              <span>Status</span>
-              <select id="status">
-                <option value="all">All</option>
-                <option value="active">Active</option>
-                <option value="deactivated">Remediated</option>
-              </select>
-            </label>
-          </div>
-          <div class="filter-group">
-            <label>
-              <span>Fixability</span>
-              <select id="fixable">
-                <option value="any">Any</option>
-                <option value="fixable">Fixable</option>
-                <option value="not_fixable">Not Fixable</option>
-              </select>
-            </label>
-          </div>
-          <div class="filter-group">
-            <label>
-              <span>Integration</span>
-              <input id="integration" type="text" placeholder="Integration ID" />
-            </label>
-          </div>
-          <div class="filter-group">
-            <label>
-              <span>Asset ID</span>
-              <input id="assetId" type="text" placeholder="Asset identifier" />
-            </label>
-          </div>
-          <div class="filter-group">
-            <label>
-              <span>CVE / Name</span>
-              <input id="cve" type="text" placeholder="Search CVE or name" />
-            </label>
-          </div>
-          <div class="filter-group">
-            <label>
-              <span>Detected From</span>
-              <input id="dateIdentifiedStart" type="date" />
-            </label>
-          </div>
-          <div class="filter-group">
-            <label>
-              <span>Detected To</span>
-              <input id="dateIdentifiedEnd" type="date" />
-            </label>
-          </div>
-          <div class="filter-group">
-            <label>
-              <span>Remediated From</span>
-              <input id="dateRemediatedStart" type="date" />
-            </label>
-          </div>
-          <div class="filter-group">
-            <label>
-              <span>Remediated To</span>
-              <input id="dateRemediatedEnd" type="date" />
-            </label>
-          </div>
-          <div class="filter-actions">
-            <button type="submit" class="secondary">Apply Filters</button>
-            <button type="button" id="clearFilters" class="link">Clear</button>
-          </div>
-        </form>
-
-        <div class="table-wrapper">
-          <table class="data-table">
-            <thead>
-              <tr>
-                <th class="sortable" data-column="id">ID <span class="sort-indicator"></span></th>
-                <th class="sortable" data-column="name">Name <span class="sort-indicator"></span></th>
-                <th class="sortable" data-column="severity">Severity <span class="sort-indicator"></span></th>
-                <th class="sortable" data-column="integration_id">Integration <span class="sort-indicator"></span></th>
-                <th class="sortable" data-column="target_id">Asset <span class="sort-indicator"></span></th>
-                <th class="sortable" data-column="first_detected">Detected <span class="sort-indicator"></span></th>
-                <th class="sortable" data-column="status">Status <span class="sort-indicator"></span></th>
-              </tr>
-            </thead>
-            <tbody id="vulnerabilityTable"></tbody>
-          </table>
-        </div>
-        <div class="table-footer">
-          <span id="paginationStatus"></span>
-          <div class="pagination-controls">
-            <button id="prevPage" class="secondary">Previous</button>
-            <button id="nextPage" class="secondary">Next</button>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <section class="card">
-      <header class="card__header">
-        <h2>Details</h2>
-        <p id="detailsSubtitle">Select a vulnerability to inspect its full payload and remediation history.</p>
-      </header>
-      <div class="card__body details">
-        <div>
-          <h3>Vulnerability Payload</h3>
-          <pre id="vulnerabilityDetails" class="code-block">No vulnerability selected.</pre>
-        </div>
-        <div>
-          <h3>Remediations</h3>
-          <pre id="remediationDetails" class="code-block">No vulnerability selected.</pre>
-        </div>
-      </div>
-    </section>
+    </div>
   </main>
 
   <footer class="app-footer">
-    <p>Database location: <span id="databasePath">Stored in the Electron user-data directory.</span></p>
+    <p>&copy; 2025 Vanta Vulnerability Dashboard</p>
   </footer>
 
   <script src="index.js"></script>
