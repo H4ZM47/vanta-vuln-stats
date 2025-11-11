@@ -925,5 +925,8 @@ const initialize = async () => {
 
 initialize().catch((error) => {
   console.error('Failed to initialize renderer', error);
-  elements.syncStatusGeneral.textContent = 'Failed to initialize application. Check console for details.';
+  if (elements.syncHistoryEmpty) {
+    elements.syncHistoryEmpty.style.display = 'block';
+    elements.syncHistoryEmpty.textContent = 'Failed to initialize application. Check console for details.';
+  }
 });
