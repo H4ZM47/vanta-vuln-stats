@@ -318,8 +318,8 @@ class DataService {
   }
 
   getVulnerabilities(options = {}) {
-    const { filters = {}, limit = 100, offset = 0 } = options;
-    const data = this.database.getVulnerabilities({ filters, limit, offset });
+    const { filters = {}, limit = 100, offset = 0, sortColumn = 'first_detected', sortDirection = 'desc' } = options;
+    const data = this.database.getVulnerabilities({ filters, limit, offset, sortColumn, sortDirection });
     const total = this.database.getVulnerabilityCount(filters);
     return { data, total };
   }
