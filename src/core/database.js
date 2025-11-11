@@ -166,11 +166,40 @@ class VulnerabilityDatabase {
       );
     `);
 
+    // Migration: Add missing columns to sync_history if they don't exist
+    this._migrateSyncHistoryColumns();
+
     this.db.exec('CREATE INDEX IF NOT EXISTS idx_vulnerabilities_severity ON vulnerabilities(severity);');
     this.db.exec('CREATE INDEX IF NOT EXISTS idx_vulnerabilities_target ON vulnerabilities(target_id);');
     this.db.exec('CREATE INDEX IF NOT EXISTS idx_vulnerabilities_deactivated ON vulnerabilities(deactivated_on);');
     this.db.exec('CREATE INDEX IF NOT EXISTS idx_vulnerabilities_fixable ON vulnerabilities(is_fixable);');
     this.db.exec('CREATE INDEX IF NOT EXISTS idx_vulnerabilities_integration ON vulnerabilities(integration_id);');
+  }
+
+  _migrateSyncHistoryColumns() {
+    // Get existing columns
+    const columns = this.db.pragma('table_info(sync_history)');
+    const columnNames = columns.map(col => col.name);
+
+    // Add missing columns if they don't exist
+    const requiredColumns = [
+      'vulnerabilities_count',
+      'vulnerabilities_new',
+      'vulnerabilities_updated',
+      'vulnerabilities_remediated',
+      'remediations_count',
+      'remediations_new',
+      'remediations_updated',
+      'new_count',
+      'updated_count',
+      'remediated_count'
+    ];
+
+    requiredColumns.forEach(columnName => {
+      if (!columnNames.includes(columnName)) {
+        this.db.exec(`ALTER TABLE sync_history ADD COLUMN ${columnName} INTEGER`);
+      }
+    });
   }
 
   close() {
