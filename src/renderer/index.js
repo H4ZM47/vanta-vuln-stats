@@ -62,6 +62,13 @@ const elements = {
   databaseStatus: document.getElementById('databaseStatus'),
 };
 
+let statisticsFiltersBuilder = () => ({});
+if (typeof window !== 'undefined' && window.VantaStatisticsFilters?.buildStatisticsFilters) {
+  statisticsFiltersBuilder = window.VantaStatisticsFilters.buildStatisticsFilters;
+} else if (typeof console !== 'undefined' && console.warn) {
+  console.warn('Statistics filters helper not found; using default summary filters.');
+}
+
 const defaultFilters = () => ({
   severity: [],
   status: 'all',
@@ -427,7 +434,8 @@ const loadDatabasePath = async () => {
 };
 
 const loadStatistics = async () => {
-  const stats = await window.vanta.getStatistics(state.filters);
+  const summaryFilters = statisticsFiltersBuilder(state.filters);
+  const stats = await window.vanta.getStatistics(summaryFilters);
   renderStatistics(stats);
 };
 
