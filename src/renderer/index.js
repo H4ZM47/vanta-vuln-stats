@@ -62,6 +62,11 @@ const elements = {
   databaseStatus: document.getElementById('databaseStatus'),
 };
 
+const statisticsFiltersBuilder =
+  (typeof window !== 'undefined' && window.VantaStatisticsFilters?.buildStatisticsFilters)
+    ? window.VantaStatisticsFilters.buildStatisticsFilters
+    : () => ({});
+
 const defaultFilters = () => ({
   severity: [],
   status: 'all',
@@ -427,7 +432,8 @@ const loadDatabasePath = async () => {
 };
 
 const loadStatistics = async () => {
-  const stats = await window.vanta.getStatistics(state.filters);
+  const summaryFilters = statisticsFiltersBuilder(state.filters);
+  const stats = await window.vanta.getStatistics(summaryFilters);
   renderStatistics(stats);
 };
 
