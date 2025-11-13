@@ -4,10 +4,10 @@
    * Currently always returns an empty object so the summary reflects the full dataset,
    * regardless of the table filters applied in the UI.
    *
-   * @param {object} _currentFilters - The active table filters (unused for now).
+   * TODO: Accept filter overrides if the summary should mirror specific table filters.
    * @returns {object} Filter payload for the statistics request.
    */
-  const buildStatisticsFilters = (_currentFilters) => {
+  const buildStatisticsFilters = () => {
     return {};
   };
 

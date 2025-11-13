@@ -62,10 +62,12 @@ const elements = {
   databaseStatus: document.getElementById('databaseStatus'),
 };
 
-const statisticsFiltersBuilder =
-  (typeof window !== 'undefined' && window.VantaStatisticsFilters?.buildStatisticsFilters)
-    ? window.VantaStatisticsFilters.buildStatisticsFilters
-    : () => ({});
+let statisticsFiltersBuilder = () => ({});
+if (typeof window !== 'undefined' && window.VantaStatisticsFilters?.buildStatisticsFilters) {
+  statisticsFiltersBuilder = window.VantaStatisticsFilters.buildStatisticsFilters;
+} else if (typeof console !== 'undefined' && console.warn) {
+  console.warn('Statistics filters helper not found; using default summary filters.');
+}
 
 const defaultFilters = () => ({
   severity: [],

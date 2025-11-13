@@ -18,5 +18,4 @@ test('buildStatisticsFilters ignores active-only filters', () => {
   const result = buildStatisticsFilters(filters);
 
   assert.deepEqual(result, {});
-  assert.notStrictEqual(result, filters);
 });
