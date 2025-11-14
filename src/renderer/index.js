@@ -603,16 +603,16 @@ const renderAssetMetadata = (assetId, assetDetails) => {
   const summary = state.assets.find((asset) => asset.assetId === assetId) || {};
   const metadata = assetDetails ?? state.assetDetails.get(assetId) ?? null;
   const displayName = metadata?.name || summary.assetName || assetId || 'Unknown Asset';
-  const externalIdentifier = metadata?.external_identifier || summary.externalIdentifier || '';
-  const integrationId = metadata?.integration_id || summary.assetIntegrationId || '';
-  const integrationType = metadata?.integration_type || summary.assetIntegrationType || '';
+  const externalIdentifier = metadata?.external_identifier || summary.externalIdentifier || null;
+  const integrationId = metadata?.integration_id || summary.assetIntegrationId || null;
+  const integrationType = metadata?.integration_type || summary.assetIntegrationType || null;
   const owner =
     metadata?.primary_owner ||
     (Array.isArray(metadata?.owners) ? metadata.owners[0] : null) ||
     summary.primaryOwner ||
-    '—';
-  const risk = metadata?.risk_level;
-  const subtype = metadata?.asset_subtype || summary.assetSubtype;
+    null;
+  const risk = metadata?.risk_level || null;
+  const subtype = metadata?.asset_subtype || summary.assetSubtype || null;
 
   const badgeValues = [risk, subtype].filter(Boolean);
   elements.assetMetaBadges.innerHTML = badgeValues
@@ -1053,23 +1053,13 @@ const generateCSVReport = (vulnerabilities, remediationsMap, includeRemediations
   return rows.join('\n');
 };
 
-const escapeHTML = (value) => {
-  if (value == null) return '—';
-  return String(value)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#039;');
-};
-
 const generateHTMLReport = (vulnerabilities, remediationsMap, includeRemediations) => {
-  const timestamp = escapeHTML(new Date().toLocaleString());
+  const timestamp = escapeHtml(new Date().toLocaleString());
   const rows = vulnerabilities
     .map((vuln) => {
       const rems = remediationsMap[vuln.id] || [];
       const remediationInfo = includeRemediations
-        ? `<td>${escapeHTML(rems.length)}</td><td>${rems.length > 0 ? escapeHTML(formatDate(rems[0].remediationDate || rems[0].detectedDate)) : '—'}</td>`
+        ? `<td>${escapeHtml(rems.length) || '—'}</td><td>${rems.length > 0 ? escapeHtml(formatDate(rems[0].remediationDate || rems[0].detectedDate)) || '—' : '—'}</td>`
         : '';
 
       // Note: severity class is safe as it's validated against known values
@@ -1077,17 +1067,17 @@ const generateHTMLReport = (vulnerabilities, remediationsMap, includeRemediation
 
       return `
         <tr>
-          <td>${escapeHTML(vuln.id)}</td>
-          <td>${escapeHTML(vuln.name)}</td>
-          <td class="severity-${severityClass}">${escapeHTML(vuln.severity || 'UNKNOWN')}</td>
-          <td>${escapeHTML(vuln.cvss_score)}</td>
-          <td>${escapeHTML(vuln.deactivated_on ? 'Remediated' : 'Active')}</td>
-          <td>${escapeHTML(vuln.fixable ? 'Yes' : 'No')}</td>
-          <td>${escapeHTML(vuln.integration_id)}</td>
-          <td>${escapeHTML(vuln.target_id)}</td>
-          <td>${escapeHTML(formatDate(vuln.first_detected))}</td>
-          <td>${escapeHTML(formatDate(vuln.deactivated_on))}</td>
-          <td>${escapeHTML(vuln.cve)}</td>
+          <td>${escapeHtml(vuln.id) || '—'}</td>
+          <td>${escapeHtml(vuln.name) || '—'}</td>
+          <td class="severity-${severityClass}">${escapeHtml(vuln.severity || 'UNKNOWN')}</td>
+          <td>${escapeHtml(vuln.cvss_score) || '—'}</td>
+          <td>${escapeHtml(vuln.deactivated_on ? 'Remediated' : 'Active')}</td>
+          <td>${escapeHtml(vuln.fixable ? 'Yes' : 'No')}</td>
+          <td>${escapeHtml(vuln.integration_id) || '—'}</td>
+          <td>${escapeHtml(vuln.target_id) || '—'}</td>
+          <td>${escapeHtml(formatDate(vuln.first_detected)) || '—'}</td>
+          <td>${escapeHtml(formatDate(vuln.deactivated_on)) || '—'}</td>
+          <td>${escapeHtml(vuln.cve) || '—'}</td>
           ${remediationInfo}
         </tr>
       `;
@@ -1168,7 +1158,7 @@ const generateHTMLReport = (vulnerabilities, remediationsMap, includeRemediation
   <h1>Vanta Vulnerability Report</h1>
   <div class="meta">
     Generated on ${timestamp}<br>
-    Total vulnerabilities: ${escapeHTML(vulnerabilities.length)}
+    Total vulnerabilities: ${escapeHtml(vulnerabilities.length)}
   </div>
   <table>
     <thead>

@@ -121,6 +121,21 @@ Returns detailed information for a specific vulnerability.
 
 ## Vulnerable Assets API
 
+### Important: Deprecated /assets Endpoint
+
+**WARNING:** The `/assets` endpoint is deprecated and returns 404 errors. Always use the `/vulnerable-assets` endpoint instead.
+
+**Migration:** If you have code using `/assets`, replace it with `/vulnerable-assets`. The response structure is identical with enhanced scanner metadata.
+
+**Affected endpoints:**
+- ~~`GET /assets`~~ → Use `GET /vulnerable-assets` instead
+- ~~`GET /assets/{id}`~~ → Use `GET /vulnerable-assets/{id}` instead
+
+**Timeline:**
+- **Before November 2025:** `/assets` endpoint was functional
+- **November 2025:** `/assets` endpoint began returning 404 errors
+- **Current:** Only `/vulnerable-assets` endpoint is supported
+
 ### List Vulnerable Assets
 
 **Endpoint:** `GET /vulnerable-assets`

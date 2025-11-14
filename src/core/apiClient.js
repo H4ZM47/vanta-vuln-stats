@@ -211,17 +211,52 @@ class VantaApiClient {
   }
 
   /**
-   * Fetch vulnerable assets from Vanta API
+   * Fetch vulnerable assets from Vanta API using the /vulnerable-assets endpoint.
+   *
+   * IMPORTANT: This method uses the /vulnerable-assets endpoint, which replaced the
+   * deprecated /assets endpoint that returned 404 errors. The /vulnerable-assets
+   * endpoint is the correct and supported way to fetch asset data from the Vanta API.
+   *
+   * The endpoint returns comprehensive asset information including:
+   * - Asset identification (id, name, type, subtype)
+   * - Scanner metadata (integration details, scan status)
+   * - Network information (IPs, hostnames, FQDNs, MAC addresses)
+   * - System details (operating systems, BIOS UUID, platform)
+   * - Asset metadata (owners, tags, environment, risk level)
+   *
    * @param {Object} options - Query options
    * @param {number} [options.pageSize=100] - Number of items per page (1-100)
    * @param {Function} [options.onBatch] - Callback for each batch of results
    * @param {Object} [options.filters={}] - Filter parameters
-   * @param {string} [options.filters.q] - Search query to filter assets
-   * @param {string} [options.filters.integrationId] - Filter by scanner integration
-   * @param {string} [options.filters.assetType] - Filter by asset type
+   * @param {string} [options.filters.q] - Search query to filter assets by name or identifier
+   * @param {string} [options.filters.integrationId] - Filter by scanner integration ID
+   * @param {string} [options.filters.assetType] - Filter by asset type (SERVER, WORKSTATION, CODE_REPOSITORY, etc.)
    * @param {string} [options.filters.assetExternalAccountId] - Filter by external account ID
-   * @param {AbortSignal} [options.signal] - Abort signal for cancellation
-   * @returns {Promise<Array>} Array of vulnerable asset objects
+   * @param {AbortSignal} [options.signal] - Abort signal for cancellation support
+   * @returns {Promise<Array>} Array of vulnerable asset objects with full metadata
+   * @throws {Error} If API returns error or pagination fails
+   *
+   * @example
+   * // Fetch all vulnerable assets
+   * const assets = await client.getVulnerableAssets();
+   *
+   * @example
+   * // Fetch only server assets from a specific scanner
+   * const servers = await client.getVulnerableAssets({
+   *   filters: {
+   *     assetType: 'SERVER',
+   *     integrationId: 'qualys'
+   *   }
+   * });
+   *
+   * @example
+   * // Fetch assets with progress tracking
+   * const assets = await client.getVulnerableAssets({
+   *   pageSize: 100,
+   *   onBatch: (batch) => {
+   *     console.log(`Fetched ${batch.length} assets`);
+   *   }
+   * });
    */
   async getVulnerableAssets({ pageSize = MAX_PAGE_SIZE, onBatch, filters = {}, signal } = {}) {
     return this.paginate({
@@ -233,9 +268,19 @@ class VantaApiClient {
   }
 
   /**
-   * Fetch a single vulnerable asset by ID
+   * Fetch a single vulnerable asset by ID from the /vulnerable-assets endpoint.
+   *
+   * IMPORTANT: This method uses the /vulnerable-assets/{id} endpoint, which replaced
+   * the deprecated /assets/{id} endpoint that returned 404 errors.
+   *
    * @param {string} assetId - The unique asset identifier
-   * @returns {Promise<Object>} The vulnerable asset object
+   * @returns {Promise<Object>} The vulnerable asset object with full metadata
+   * @throws {Error} If asset not found or API returns error
+   *
+   * @example
+   * const asset = await client.getVulnerableAsset('asset-id-123');
+   * console.log(asset.name); // "production-server-01"
+   * console.log(asset.assetType); // "SERVER"
    */
   async getVulnerableAsset(assetId) {
     const response = await this.requestWithRetry({

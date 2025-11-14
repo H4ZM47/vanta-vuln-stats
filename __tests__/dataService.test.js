@@ -58,7 +58,7 @@ describe('DataService - Sync Operations', () => {
         updated: 3,
         total: 11,
       })),
-      storeAssetsBatch: jest.fn(() => ({
+      storeVulnerableAssetsBatch: jest.fn(() => ({
         new: 6,
         updated: 4,
         total: 10,
@@ -236,7 +236,7 @@ describe('DataService - Sync Operations', () => {
 
       await dataService.syncData();
 
-      expect(mockDatabaseInstance.storeAssetsBatch).toHaveBeenCalled();
+      expect(mockDatabaseInstance.storeVulnerableAssetsBatch).toHaveBeenCalled();
     });
   });
 

@@ -155,6 +155,33 @@ class VulnerabilityDatabase {
           @new_count, @updated_count, @remediated_count
         )
       `),
+      selectVulnerableAssetRaw: this.db.prepare('SELECT raw_data FROM vulnerable_assets WHERE id = ?'),
+      upsertVulnerableAsset: this.db.prepare(`
+        INSERT INTO vulnerable_assets (
+          id, asset_type, display_name, integration_id, integration_type,
+          vulnerability_count, critical_count, high_count, medium_count, low_count,
+          first_detected, last_detected, updated_at, metadata, raw_data
+        ) VALUES (
+          @id, @asset_type, @display_name, @integration_id, @integration_type,
+          @vulnerability_count, @critical_count, @high_count, @medium_count, @low_count,
+          @first_detected, @last_detected, @updated_at, @metadata, @raw_data
+        )
+        ON CONFLICT(id) DO UPDATE SET
+          asset_type = excluded.asset_type,
+          display_name = excluded.display_name,
+          integration_id = excluded.integration_id,
+          integration_type = excluded.integration_type,
+          vulnerability_count = excluded.vulnerability_count,
+          critical_count = excluded.critical_count,
+          high_count = excluded.high_count,
+          medium_count = excluded.medium_count,
+          low_count = excluded.low_count,
+          first_detected = excluded.first_detected,
+          last_detected = excluded.last_detected,
+          updated_at = excluded.updated_at,
+          metadata = excluded.metadata,
+          raw_data = excluded.raw_data
+      `),
     };
   }
 
@@ -229,6 +256,26 @@ class VulnerabilityDatabase {
     `);
 
     this.db.exec(`
+      CREATE TABLE IF NOT EXISTS vulnerable_assets (
+        id TEXT PRIMARY KEY,
+        asset_type TEXT,
+        display_name TEXT,
+        integration_id TEXT,
+        integration_type TEXT,
+        vulnerability_count INTEGER DEFAULT 0,
+        critical_count INTEGER DEFAULT 0,
+        high_count INTEGER DEFAULT 0,
+        medium_count INTEGER DEFAULT 0,
+        low_count INTEGER DEFAULT 0,
+        first_detected TEXT,
+        last_detected TEXT,
+        updated_at TEXT NOT NULL,
+        metadata TEXT,
+        raw_data TEXT NOT NULL
+      );
+    `);
+
+    this.db.exec(`
       CREATE TABLE IF NOT EXISTS sync_history (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         sync_date TEXT NOT NULL,
@@ -263,6 +310,9 @@ class VulnerabilityDatabase {
     this.db.exec('CREATE INDEX IF NOT EXISTS idx_assets_integration ON assets(integration_id);');
     this.db.exec('CREATE INDEX IF NOT EXISTS idx_assets_type ON assets(asset_type);');
     this.db.exec('CREATE INDEX IF NOT EXISTS idx_assets_name ON assets(name);');
+    this.db.exec('CREATE INDEX IF NOT EXISTS idx_vulnerable_assets_type ON vulnerable_assets(asset_type);');
+    this.db.exec('CREATE INDEX IF NOT EXISTS idx_vulnerable_assets_integration ON vulnerable_assets(integration_id);');
+    this.db.exec('CREATE INDEX IF NOT EXISTS idx_vulnerable_assets_vuln_count ON vulnerable_assets(vulnerability_count);');
   }
 
   _migrateSyncHistoryColumns() {
@@ -415,10 +465,116 @@ class VulnerabilityDatabase {
       .filter(Boolean);
   }
 
+  /**
+   * Normalize asset data from the /vulnerable-assets endpoint into database schema.
+   *
+   * This method extracts and normalizes asset information from the Vanta API response
+   * format into the local database schema. It handles multiple field name variations
+   * and supports the /vulnerable-assets endpoint structure with scanner metadata.
+   *
+   * IMPORTANT: This method processes data from the /vulnerable-assets endpoint, which
+   * replaced the deprecated /assets endpoint. The new endpoint includes richer metadata
+   * via the scanners[] array containing scanner-specific details like IPs, hostnames,
+   * operating systems, and asset tags.
+   *
+   * Key normalization behaviors:
+   * - Extracts asset name from multiple possible field names (displayName, name, assetName, etc.)
+   * - Normalizes owner information from arrays or single values into consistent format
+   * - Flattens nested integration and scanner objects into top-level fields
+   * - Extracts environment from scanner asset tags when not available at top level
+   * - Extracts platform/OS from scanner metadata when not available at top level
+   * - Converts complex tag structures into JSON arrays
+   * - Preserves full raw API response for audit and debugging
+   *
+   * Scanner metadata extraction (from scanners[0]):
+   * - integration_id: Extracted from integrationId field
+   * - environment: Extracted from assetTags with key='environment'
+   * - platform: Extracted from operatingSystems[0]
+   * - external_identifier: Extracted from targetId
+   *
+   * Field extraction priority (uses first non-null value):
+   * - name: displayName > name > assetName > resourceName > title
+   * - owners: owners > owner > assignedUsers > ownerList
+   * - tags: tags > labels > tagList
+   * - type: assetType > resourceType
+   * - platform: platform > platformName > operatingSystem > os > scanners[0].operatingSystems[0]
+   * - environment: environment > environmentName > environmentType > scanners[0].assetTags['environment']
+   * - integration_id: integrationId > integration.id > scanners[0].integrationId
+   * - external_identifier: externalIdentifier > resourceIdentifier > uniqueIdentifier > slug > scanners[0].targetId
+   *
+   * @private
+   * @param {Object} asset - Raw asset object from /vulnerable-assets API endpoint
+   * @param {string} asset.id - Required unique asset identifier
+   * @param {string} [asset.name] - Asset display name (may use various field names)
+   * @param {string} [asset.assetType] - Asset type (SERVER, WORKSTATION, CODE_REPOSITORY, etc.)
+   * @param {Array|Object} [asset.owners] - Asset owners (supports multiple formats)
+   * @param {Array|Object} [asset.tags] - Asset tags or labels
+   * @param {Array} [asset.scanners] - Array of scanner metadata objects (new in /vulnerable-assets)
+   * @param {string} [asset.scanners[].integrationId] - Scanner integration identifier
+   * @param {Array} [asset.scanners[].operatingSystems] - Operating system names
+   * @param {Array} [asset.scanners[].assetTags] - Scanner-reported asset tags
+   * @param {string} [asset.scanners[].targetId] - Scanner-specific target identifier
+   * @param {Object} [asset.integration] - Integration metadata object
+   * @param {string} [asset.environment] - Environment name (production, staging, etc.)
+   * @param {string} [asset.platform] - Platform or OS information
+   * @returns {Object|null} Normalized asset object ready for database insertion, or null if asset.id is missing
+   * @returns {string} return.id - Asset unique identifier
+   * @returns {string|null} return.name - Normalized display name
+   * @returns {string|null} return.asset_type - Asset type
+   * @returns {string|null} return.integration_id - Scanner integration ID (from top level or scanners[0])
+   * @returns {string|null} return.environment - Environment name (from top level or scanner tags)
+   * @returns {string|null} return.platform - Platform/OS (from top level or scanner metadata)
+   * @returns {string|null} return.primary_owner - First owner from owners list
+   * @returns {string|null} return.owners - JSON stringified array of all owners
+   * @returns {string|null} return.tags - JSON stringified array of tags
+   * @returns {string|null} return.external_identifier - External identifier (from top level or scanner targetId)
+   * @returns {string} return.raw_data - Full JSON of original API response
+   * @returns {string} return.updated_at - ISO 8601 timestamp of normalization
+   *
+   * @example
+   * // API response from /vulnerable-assets with scanner metadata
+   * const apiAsset = {
+   *   id: 'asset-123',
+   *   name: 'production-server-01',
+   *   assetType: 'SERVER',
+   *   owners: ['alice@example.com'],
+   *   scanners: [{
+   *     integrationId: 'qualys',
+   *     operatingSystems: ['Ubuntu 20.04 LTS'],
+   *     assetTags: [
+   *       { key: 'environment', value: 'production' },
+   *       { key: 'team', value: 'platform' }
+   *     ],
+   *     targetId: 'scanner-target-123',
+   *     ipv4s: ['192.168.1.100'],
+   *     hostnames: ['web-server']
+   *   }]
+   * };
+   *
+   * // Normalized for database
+   * const normalized = this._normaliseAsset(apiAsset);
+   * // {
+   * //   id: 'asset-123',
+   * //   name: 'production-server-01',
+   * //   asset_type: 'SERVER',
+   * //   integration_id: 'qualys',
+   * //   environment: 'production',
+   * //   platform: 'Ubuntu 20.04 LTS',
+   * //   external_identifier: 'scanner-target-123',
+   * //   primary_owner: 'alice@example.com',
+   * //   owners: '["alice@example.com"]',
+   * //   updated_at: '2025-11-14T12:00:00.000Z',
+   * //   raw_data: '{"id":"asset-123",...}'
+   * // }
+   */
   _normaliseAsset(asset) {
     if (!asset?.id) {
       return null;
     }
+
+    // Extract scanner metadata from scanners array (for /vulnerable-assets endpoint)
+    // The /vulnerable-assets endpoint includes detailed scanner metadata not present in deprecated /assets
+    const scanner = asset.scanners?.[0];
 
     const owners = this._normalizeOwnerList(asset.owners ?? asset.owner ?? asset.assignedUsers ?? asset.ownerList);
     const tags = this._normalizeTags(asset.tags ?? asset.labels ?? asset.tagList);
@@ -432,16 +588,43 @@ class VulnerabilityDatabase {
     const description = asset.description ?? asset.summary ?? asset.notes ?? null;
     const assetType = asset.assetType ?? asset.resourceType ?? null;
     const assetSubtype = asset.assetSubtype ?? asset.resourceSubtype ?? null;
-    const integrationId = asset.integrationId ?? asset.integration?.id ?? null;
+
+    // Extract integration_id from scanners array if not directly available
+    const integrationId =
+      asset.integrationId ??
+      asset.integration?.id ??
+      scanner?.integrationId ??
+      null;
     const integrationType = asset.integrationType ?? asset.integration?.type ?? null;
-    const environment = asset.environment ?? asset.environmentName ?? asset.environmentType ?? null;
-    const platform = asset.platform ?? asset.platformName ?? asset.operatingSystem ?? asset.os ?? null;
+
+    // Extract environment from scanners[0].assetTags (key='environment')
+    const environmentFromTags = scanner?.assetTags?.find(t => t.key === 'environment')?.value;
+    const environment =
+      asset.environment ??
+      asset.environmentName ??
+      asset.environmentType ??
+      environmentFromTags ??
+      null;
+
+    // Extract platform from scanners[0].operatingSystems[0]
+    const platformFromScanner = scanner?.operatingSystems?.[0];
+    const platform =
+      asset.platform ??
+      asset.platformName ??
+      asset.operatingSystem ??
+      asset.os ??
+      platformFromScanner ??
+      null;
+
+    // Extract external_identifier from scanner.targetId if not available
     const externalIdentifier =
       asset.externalIdentifier ??
       asset.resourceIdentifier ??
       asset.uniqueIdentifier ??
       asset.slug ??
+      scanner?.targetId ??
       null;
+
     const riskLevel = asset.riskLevel ?? asset.risk ?? null;
     const firstSeen = asset.firstSeen ?? asset.firstSeenAt ?? asset.firstSeenOn ?? null;
     const lastSeen = asset.lastSeen ?? asset.lastSeenAt ?? asset.lastSeenDate ?? asset.lastSeenOn ?? null;
@@ -467,6 +650,110 @@ class VulnerabilityDatabase {
       tags: tags.length ? this._safeStringify(tags) : null,
       created_at: createdAt,
       updated_at: now,
+      raw_data: JSON.stringify(asset),
+    };
+  }
+
+  /**
+   * Normalize vulnerable asset data from the /vulnerable-assets endpoint into database schema.
+   *
+   * This method transforms asset data and vulnerability count statistics into the format
+   * required by the vulnerable_assets table. The vulnerability counts can either be provided
+   * as part of the asset object or calculated separately from the vulnerabilities table.
+   *
+   * @private
+   * @param {Object} asset - Raw asset object from /vulnerable-assets API endpoint
+   * @param {string} asset.id - Required unique asset identifier
+   * @param {string} [asset.name] - Asset display name
+   * @param {string} [asset.displayName] - Alternative display name field
+   * @param {string} [asset.assetType] - Asset type (SERVER, WORKSTATION, etc.)
+   * @param {string} [asset.integrationId] - Scanner integration identifier
+   * @param {string} [asset.integrationType] - Integration type
+   * @param {Object} [asset.vulnerabilityCounts] - Vulnerability count statistics
+   * @param {number} [asset.vulnerabilityCounts.total] - Total vulnerability count
+   * @param {number} [asset.vulnerabilityCounts.critical] - Critical severity count
+   * @param {number} [asset.vulnerabilityCounts.high] - High severity count
+   * @param {number} [asset.vulnerabilityCounts.medium] - Medium severity count
+   * @param {number} [asset.vulnerabilityCounts.low] - Low severity count
+   * @param {string} [asset.firstDetected] - First detection timestamp
+   * @param {string} [asset.lastDetected] - Last detection timestamp
+   * @param {Object} [asset.metadata] - Additional metadata
+   * @returns {Object|null} Normalized vulnerable asset object ready for database insertion, or null if asset.id is missing
+   */
+  _normaliseVulnerableAsset(asset) {
+    if (!asset?.id) {
+      return null;
+    }
+
+    // Extract scanner metadata from scanners array (for /vulnerable-assets endpoint)
+    // Scanner provides fallback integration_id, integration_type, and external_identifier
+    // when not available at top level (consistent with _normaliseAsset)
+    const scanner = asset.scanners?.[0];
+
+    // Extract display name with fallback options
+    const displayName =
+      asset.displayName ??
+      asset.name ??
+      asset.assetName ??
+      asset.resourceName ??
+      null;
+
+    // Extract asset type
+    const assetType = asset.assetType ?? asset.resourceType ?? null;
+
+    // Extract integration information with scanner fallback
+    const integrationId =
+      asset.integrationId ??
+      asset.integration?.id ??
+      scanner?.integrationId ??
+      null;
+    const integrationType =
+      asset.integrationType ??
+      asset.integration?.type ??
+      scanner?.integrationType ??
+      null;
+
+    // Extract external identifier with scanner fallback (targetId from scanner)
+    const externalIdentifier =
+      asset.externalIdentifier ??
+      asset.resourceIdentifier ??
+      asset.uniqueIdentifier ??
+      scanner?.targetId ??
+      null;
+
+    // Extract vulnerability counts (may be provided by caller or from asset object)
+    const counts = asset.vulnerabilityCounts ?? {};
+    const vulnerabilityCount = counts.total ?? 0;
+    const criticalCount = counts.critical ?? 0;
+    const highCount = counts.high ?? 0;
+    const mediumCount = counts.medium ?? 0;
+    const lowCount = counts.low ?? 0;
+
+    // Extract timestamps
+    const firstDetected = asset.firstDetected ?? asset.firstDetectedDate ?? null;
+    const lastDetected = asset.lastDetected ?? asset.lastDetectedDate ?? null;
+
+    // Extract metadata
+    const metadata = asset.metadata ? this._safeStringify(asset.metadata) : null;
+
+    const now = dayjs().toISOString();
+
+    return {
+      id: asset.id,
+      asset_type: assetType,
+      display_name: displayName,
+      integration_id: integrationId,
+      integration_type: integrationType,
+      external_identifier: externalIdentifier,
+      vulnerability_count: vulnerabilityCount,
+      critical_count: criticalCount,
+      high_count: highCount,
+      medium_count: mediumCount,
+      low_count: lowCount,
+      first_detected: firstDetected,
+      last_detected: lastDetected,
+      updated_at: now,
+      metadata,
       raw_data: JSON.stringify(asset),
     };
   }
@@ -681,6 +968,78 @@ class VulnerabilityDatabase {
         }
 
         this.statements.upsertAsset.run(payload);
+        existingMap.set(row.id, payload.raw_data);
+      });
+
+      return { new: newCount, updated: updatedCount, total: rows.length };
+    });
+
+    return tx(assets);
+  }
+
+  /**
+   * Store vulnerable assets in batch with statistics tracking.
+   *
+   * This method efficiently stores or updates multiple vulnerable assets in a single transaction.
+   * It follows the same optimization pattern as storeVulnerabilitiesBatch(), using batch lookups
+   * for existing records and tracking new/updated counts.
+   *
+   * @param {Array<Object>} assets - Array of vulnerable asset objects from API
+   * @returns {Object} Statistics object with new, updated, and total counts
+   * @returns {number} return.new - Number of new assets inserted
+   * @returns {number} return.updated - Number of existing assets updated
+   * @returns {number} return.total - Total number of assets processed
+   */
+  storeVulnerableAssetsBatch(assets = []) {
+    const tx = this.db.transaction((rows) => {
+      if (!rows.length) {
+        return { new: 0, updated: 0, total: 0 };
+      }
+
+      const ids = rows.filter((row) => row?.id).map((row) => row.id);
+      if (!ids.length) {
+        return { new: 0, updated: 0, total: 0 };
+      }
+
+      const now = dayjs().toISOString();
+
+      // Batch lookup: Get all existing records in one query
+      const placeholders = ids.map(() => '?').join(',');
+      const existingRecords = this.db
+        .prepare(`SELECT id, raw_data FROM vulnerable_assets WHERE id IN (${placeholders})`)
+        .all(...ids);
+
+      // Build lookup map for O(1) access
+      const existingMap = new Map(
+        existingRecords.map((record) => [record.id, record.raw_data])
+      );
+
+      let newCount = 0;
+      let updatedCount = 0;
+
+      rows.forEach((row) => {
+        if (!row?.id) {
+          return;
+        }
+
+        const payload = this._normaliseVulnerableAsset(row);
+        if (!payload) {
+          return;
+        }
+
+        // Ensure timestamp consistency within batch
+        payload.updated_at = now;
+
+        const existingRaw = existingMap.get(row.id);
+        if (!existingRaw) {
+          newCount += 1;
+        } else if (existingRaw !== payload.raw_data) {
+          updatedCount += 1;
+        }
+
+        this.statements.upsertVulnerableAsset.run(payload);
+
+        // Update map so duplicate IDs within same batch are treated as updates
         existingMap.set(row.id, payload.raw_data);
       });
 
@@ -1149,6 +1508,234 @@ class VulnerabilityDatabase {
     };
   }
 
+  /**
+   * Build WHERE clause and parameters for vulnerable assets queries.
+   *
+   * @private
+   * @param {Object} filters - Filter options
+   * @param {string} [filters.assetType] - Filter by asset type
+   * @param {string} [filters.integrationId] - Filter by integration ID
+   * @param {number} [filters.minVulnerabilityCount] - Minimum vulnerability count
+   * @param {number} [filters.maxVulnerabilityCount] - Maximum vulnerability count
+   * @param {string} [filters.search] - Search in display name
+   * @returns {Object} Object with where clause and params
+   */
+  _buildVulnerableAssetFilters(filters = {}) {
+    const clauses = [];
+    const params = {};
+
+    if (filters.assetType) {
+      clauses.push('va.asset_type = @assetType');
+      params.assetType = filters.assetType;
+    }
+
+    if (filters.integrationId) {
+      clauses.push('va.integration_id = @integrationId');
+      params.integrationId = filters.integrationId;
+    }
+
+    if (filters.minVulnerabilityCount !== undefined) {
+      clauses.push('va.vulnerability_count >= @minVulnerabilityCount');
+      params.minVulnerabilityCount = filters.minVulnerabilityCount;
+    }
+
+    if (filters.maxVulnerabilityCount !== undefined) {
+      clauses.push('va.vulnerability_count <= @maxVulnerabilityCount');
+      params.maxVulnerabilityCount = filters.maxVulnerabilityCount;
+    }
+
+    if (filters.search) {
+      clauses.push('(va.display_name LIKE @search OR va.id LIKE @search)');
+      params.search = `%${filters.search}%`;
+    }
+
+    const where = clauses.length ? `WHERE ${clauses.join(' AND ')}` : '';
+    return { where, params };
+  }
+
+  /**
+   * Get paginated list of vulnerable assets with filters and sorting.
+   *
+   * @param {Object} options - Query options
+   * @param {Object} [options.filters] - Filter options
+   * @param {string} [options.filters.assetType] - Filter by asset type
+   * @param {string} [options.filters.integrationId] - Filter by integration ID
+   * @param {number} [options.filters.minVulnerabilityCount] - Minimum vulnerability count
+   * @param {number} [options.filters.maxVulnerabilityCount] - Maximum vulnerability count
+   * @param {string} [options.filters.search] - Search in display name
+   * @param {number} [options.limit=100] - Maximum number of results
+   * @param {number} [options.offset=0] - Result offset for pagination
+   * @param {string} [options.sortColumn='vulnerability_count'] - Column to sort by
+   * @param {string} [options.sortDirection='desc'] - Sort direction (asc/desc)
+   * @returns {Array} Array of vulnerable asset records
+   */
+  getVulnerableAssets({ filters = {}, limit = 100, offset = 0, sortColumn = 'vulnerability_count', sortDirection = 'desc' } = {}) {
+    const { where, params } = this._buildVulnerableAssetFilters(filters);
+
+    // Map of allowed sort columns to prevent SQL injection
+    const allowedColumns = {
+      id: 'va.id',
+      display_name: 'va.display_name',
+      asset_type: 'va.asset_type',
+      integration_id: 'va.integration_id',
+      vulnerability_count: 'va.vulnerability_count',
+      critical_count: 'va.critical_count',
+      high_count: 'va.high_count',
+      medium_count: 'va.medium_count',
+      low_count: 'va.low_count',
+      first_detected: 'va.first_detected',
+      last_detected: 'va.last_detected',
+    };
+
+    // Validate and sanitize sort column
+    const actualColumn = allowedColumns[sortColumn] || 'va.vulnerability_count';
+
+    // Validate sort direction
+    const direction = sortDirection.toLowerCase() === 'asc' ? 'ASC' : 'DESC';
+
+    // Build ORDER BY clause, handling NULL values
+    const orderBy = `ORDER BY (${actualColumn} IS NULL), ${actualColumn} ${direction}, va.display_name ASC`;
+
+    const query = `
+      SELECT
+        va.id,
+        va.asset_type,
+        va.display_name,
+        va.integration_id,
+        va.integration_type,
+        va.vulnerability_count,
+        va.critical_count,
+        va.high_count,
+        va.medium_count,
+        va.low_count,
+        va.first_detected,
+        va.last_detected,
+        va.updated_at
+      FROM vulnerable_assets va
+      ${where}
+      ${orderBy}
+      LIMIT @limit OFFSET @offset
+    `;
+
+    const stmt = this.db.prepare(query);
+    return stmt.all({ ...params, limit, offset });
+  }
+
+  /**
+   * Get count of vulnerable assets matching filters.
+   *
+   * @param {Object} [filters] - Filter options
+   * @returns {number} Count of matching assets
+   */
+  getVulnerableAssetCount(filters = {}) {
+    const { where, params } = this._buildVulnerableAssetFilters(filters);
+    const stmt = this.db.prepare(`SELECT COUNT(*) as count FROM vulnerable_assets va ${where}`);
+    const row = stmt.get(params);
+    return row?.count ?? 0;
+  }
+
+  /**
+   * Get full details for a specific vulnerable asset.
+   *
+   * @param {string} id - Asset ID
+   * @returns {Object|null} Asset details with parsed raw_data, or null if not found
+   */
+  getVulnerableAssetDetails(id) {
+    if (!id) {
+      return null;
+    }
+
+    const stmt = this.db.prepare(`
+      SELECT
+        id,
+        asset_type,
+        display_name,
+        integration_id,
+        integration_type,
+        vulnerability_count,
+        critical_count,
+        high_count,
+        medium_count,
+        low_count,
+        first_detected,
+        last_detected,
+        updated_at,
+        metadata,
+        raw_data
+      FROM vulnerable_assets
+      WHERE id = ?
+    `);
+
+    const row = stmt.get(id);
+    if (!row) {
+      return null;
+    }
+
+    const safeParse = (value, fallback) => {
+      if (!value) return fallback;
+      try {
+        return JSON.parse(value);
+      } catch (error) {
+        console.warn('[VulnerabilityDatabase] Failed to parse JSON for vulnerable asset detail', error);
+        return fallback;
+      }
+    };
+
+    return {
+      ...row,
+      metadata: safeParse(row.metadata, null),
+      raw_data: safeParse(row.raw_data, null),
+    };
+  }
+
+  /**
+   * Get all vulnerabilities for a specific asset.
+   *
+   * This method retrieves vulnerabilities from the vulnerabilities table where
+   * the target_id matches the asset ID.
+   *
+   * @param {string} assetId - Asset ID
+   * @returns {Array} Array of vulnerability records for the asset
+   */
+  getVulnerabilitiesForAsset(assetId) {
+    if (!assetId) {
+      return [];
+    }
+
+    const stmt = this.db.prepare(`
+      SELECT
+        v.id,
+        v.name,
+        v.description,
+        v.severity,
+        v.cvss_score,
+        v.scanner_score,
+        v.is_fixable,
+        v.first_detected,
+        v.last_detected,
+        v.deactivated_on,
+        v.integration_id,
+        v.package_identifier,
+        v.vulnerability_type,
+        v.remediate_by,
+        v.external_url
+      FROM vulnerabilities v
+      WHERE v.target_id = ?
+      ORDER BY
+        CASE v.severity
+          WHEN 'CRITICAL' THEN 1
+          WHEN 'HIGH' THEN 2
+          WHEN 'MEDIUM' THEN 3
+          WHEN 'LOW' THEN 4
+          WHEN 'INFO' THEN 5
+          ELSE 6
+        END ASC,
+        v.first_detected DESC
+    `);
+
+    return stmt.all(assetId);
+  }
+
   _getRemediationStatistics(where, params) {
     // Build the WHERE clause for remediations that match filtered vulnerabilities
     const remediationWhere = where
@@ -1191,10 +1778,17 @@ class VulnerabilityDatabase {
       GROUP BY remediation_status
     `).all(remediationParams);
 
-    const statusCounts = byStatus.reduce((acc, row) => {
-      acc[row.remediation_status] = row.count;
-      return acc;
-    }, {});
+    const statusCounts = byStatus.reduce(
+      (acc, row) => {
+        acc[row.remediation_status] = row.count;
+        return acc;
+      },
+      {
+        remediated: 0,
+        overdue: 0,
+        open: 0,
+      },
+    );
 
     // On-time vs late remediations
     const timeliness = this.db.prepare(`
@@ -1210,21 +1804,43 @@ class VulnerabilityDatabase {
       GROUP BY timeliness
     `).all(remediationParams);
 
-    const timelinessCounts = timeliness.reduce((acc, row) => {
-      acc[row.timeliness] = row.count;
-      return acc;
-    }, {});
+    const timelinessCounts = timeliness.reduce(
+      (acc, row) => {
+        acc[row.timeliness] = row.count;
+        return acc;
+      },
+      {
+        on_time: 0,
+        late: 0,
+        pending: 0,
+      },
+    );
+
+    const statusSection = {
+      remediated: statusCounts.remediated ?? 0,
+      overdue: statusCounts.overdue ?? 0,
+      open: statusCounts.open ?? 0,
+    };
+
+    const timelinessSection = {
+      onTime: timelinessCounts.on_time ?? 0,
+      late: timelinessCounts.late ?? 0,
+      pending: timelinessCounts.pending ?? 0,
+    };
 
     return {
       total: totalRemediations,
       withMatchingVulnerability: remediationsWithVulns,
-      withoutMatchingVulnerability: totalRemediations - remediationsWithVulns,
-      remediated: statusCounts.remediated ?? 0,
-      overdue: statusCounts.overdue ?? 0,
-      open: statusCounts.open ?? 0,
-      onTime: timelinessCounts.on_time ?? 0,
-      late: timelinessCounts.late ?? 0,
-      pending: timelinessCounts.pending ?? 0,
+      withoutMatchingVulnerability: Math.max(totalRemediations - remediationsWithVulns, 0),
+      byStatus: statusSection,
+      byTimeliness: timelinessSection,
+      // Keep flattened fields for backward compatibility
+      remediated: statusSection.remediated,
+      overdue: statusSection.overdue,
+      open: statusSection.open,
+      onTime: timelinessSection.onTime,
+      late: timelinessSection.late,
+      pending: timelinessSection.pending,
     };
   }
 

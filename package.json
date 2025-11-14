@@ -1,6 +1,6 @@
 {
   "name": "vanta-vuln-stats-electron",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Electron application for synchronizing and visualizing Vanta vulnerability data.",
   "main": "src/main/main.js",
   "scripts": {
@@ -34,7 +34,6 @@
   "author": "",
   "license": "MIT",
   "devDependencies": {
-    "@mermaid-js/mermaid-cli": "^11.12.0",
     "@types/jest": "^30.0.0",
     "electron": "^35.7.5",
     "electron-builder": "^24.13.3",
@@ -45,6 +44,9 @@
     "better-sqlite3": "^12.4.1",
     "dayjs": "^1.11.10",
     "electron-store": "^8.1.0"
+  },
+  "overrides": {
+    "js-yaml": "^4.1.1"
   },
   "build": {
     "appId": "com.vanta.vulnstats",
