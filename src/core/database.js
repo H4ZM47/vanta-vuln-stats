@@ -242,6 +242,9 @@ class VulnerabilityDatabase {
         remediations_count INTEGER,
         remediations_new INTEGER,
         remediations_updated INTEGER,
+        assets_count INTEGER,
+        assets_new INTEGER,
+        assets_updated INTEGER,
         new_count INTEGER,
         updated_count INTEGER,
         remediated_count INTEGER
@@ -276,6 +279,9 @@ class VulnerabilityDatabase {
       'remediations_count',
       'remediations_new',
       'remediations_updated',
+      'assets_count',
+      'assets_new',
+      'assets_updated',
       'new_count',
       'updated_count',
       'remediated_count'
@@ -685,9 +691,9 @@ class VulnerabilityDatabase {
   }
 
   buildFilters(filters = {}, options = {}) {
-    const alias = options.alias || null;
-    const column = (name) => (alias ? `${alias}.${name}` : name);
-    const tableRef = alias || 'vulnerabilities';
+    const alias = options.alias ?? null;
+    const tableRef = alias || options.tableRef || 'vulnerabilities';
+    const column = (name) => `${tableRef}.${name}`;
     const clauses = [];
     const params = {};
 
@@ -700,7 +706,11 @@ class VulnerabilityDatabase {
     }
 
     if (filters.status === 'active') {
-      clauses.push(`${column('deactivated_on')} IS NULL`);
+      clauses.push(`NOT EXISTS (
+        SELECT 1 FROM vulnerability_remediations vr
+        WHERE vr.vulnerability_id = ${tableRef}.id
+        AND vr.remediation_date IS NOT NULL
+      )`);
     } else if (filters.status === 'deactivated') {
       // "Remediated" means the vulnerability has at least one remediation record with a remediation_date
       clauses.push(`EXISTS (
