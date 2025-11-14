@@ -41,6 +41,16 @@ const elements = {
   assetCount: document.getElementById('assetCount'),
   assetVulnTitle: document.getElementById('assetVulnTitle'),
   assetVulnTable: document.getElementById('assetVulnTable'),
+  assetMetaCard: document.getElementById('assetMetaCard'),
+  assetMetaName: document.getElementById('assetMetaName'),
+  assetMetaId: document.getElementById('assetMetaId'),
+  assetMetaBadges: document.getElementById('assetMetaBadges'),
+  assetMetaIntegration: document.getElementById('assetMetaIntegration'),
+  assetMetaOwner: document.getElementById('assetMetaOwner'),
+  assetMetaType: document.getElementById('assetMetaType'),
+  assetMetaEnvironment: document.getElementById('assetMetaEnvironment'),
+  assetMetaPlatform: document.getElementById('assetMetaPlatform'),
+  assetMetaLastSeen: document.getElementById('assetMetaLastSeen'),
   prevAssetPage: document.getElementById('prevAssetPage'),
   nextAssetPage: document.getElementById('nextAssetPage'),
   assetPaginationStatus: document.getElementById('assetPaginationStatus'),
@@ -151,6 +161,7 @@ const state = {
   assetPageSize: 25,
   assetCache: null,
   assetCacheFilters: null,
+  assetDetails: new Map(),
   cves: [],
   selectedCve: null,
   cveSearchTerm: '',
@@ -364,15 +375,24 @@ const renderSyncHistory = (history) => {
         if (eventType === 'flush') {
           const details = item.details ? JSON.parse(item.details) : null;
           if (details) {
-            const stats = details.type === 'vulnerabilities'
-              ? `(new: ${item.vulnerabilities_new || 0}, updated: ${item.vulnerabilities_updated || 0}, remediated: ${item.vulnerabilities_remediated || 0})`
-              : `(new: ${item.remediations_new || 0}, updated: ${item.remediations_updated || 0})`;
+            let stats = '';
+            if (details.type === 'vulnerabilities') {
+              stats = `(new: ${item.vulnerabilities_new || 0}, updated: ${item.vulnerabilities_updated || 0}, remediated: ${item.vulnerabilities_remediated || 0})`;
+            } else if (details.type === 'remediations') {
+              stats = `(new: ${item.remediations_new || 0}, updated: ${item.remediations_updated || 0})`;
+            } else if (details.type === 'assets') {
+              stats = `(new: ${item.assets_new || 0}, updated: ${item.assets_updated || 0})`;
+            }
             message += ` ${stats}`;
           }
         } else if (eventType === 'complete') {
           const vulnTotal = item.vulnerabilities_count || 0;
           const remTotal = item.remediations_count || 0;
-          message += ` — Vulnerabilities: ${formatNumber(vulnTotal)} (new: ${item.vulnerabilities_new || 0}, updated: ${item.vulnerabilities_updated || 0}, remediated: ${item.vulnerabilities_remediated || 0}) | Remediations: ${formatNumber(remTotal)} (new: ${item.remediations_new || 0}, updated: ${item.remediations_updated || 0})`;
+          const assetTotal = item.assets_count || 0;
+          const assetSummary = assetTotal || item.assets_new || item.assets_updated
+            ? ` | Assets: ${formatNumber(assetTotal)} (new: ${item.assets_new || 0}, updated: ${item.assets_updated || 0})`
+            : '';
+          message += ` — Vulnerabilities: ${formatNumber(vulnTotal)} (new: ${item.vulnerabilities_new || 0}, updated: ${item.vulnerabilities_updated || 0}, remediated: ${item.vulnerabilities_remediated || 0}) | Remediations: ${formatNumber(remTotal)} (new: ${item.remediations_new || 0}, updated: ${item.remediations_updated || 0})${assetSummary}`;
         }
       } else {
         // Legacy format for old entries without event_type
@@ -398,6 +418,15 @@ const renderSyncHistory = (history) => {
             `updated ${formatNumber(item.remediations_updated || 0)}`,
           ];
           segments.push(`Remediations ${remParts.join(', ')}`);
+        }
+
+        if (item.assets_count !== undefined && item.assets_count !== null) {
+          const assetParts = [
+            `total ${formatNumber(item.assets_count)}`,
+            `new ${formatNumber(item.assets_new || 0)}`,
+            `updated ${formatNumber(item.assets_updated || 0)}`,
+          ];
+          segments.push(`Assets ${assetParts.join(', ')}`);
         }
 
         message = segments.length ? `Sync completed — ${segments.join(' | ')}` : 'Sync completed.';
@@ -429,13 +458,16 @@ const renderVulnerabilities = () => {
       const statusIcon = isRemediated ? '✓' : '●';
       const severityClass = item.severity ? `severity-chip ${item.severity}` : '';
       const isSelected = state.selectedId === item.id ? 'selected' : '';
+      const assetDisplay = item.asset_name
+        ? `<div>${escapeHtml(item.asset_name)}</div><span class="table-subtext">${escapeHtml(item.target_id || '—')}</span>`
+        : escapeHtml(item.target_id || '—');
       return `
         <tr data-id="${item.id}" class="${isSelected}">
-          <td>${item.id}</td>
-          <td>${item.name || '—'}</td>
-          <td><span class="${severityClass}">${item.severity || 'UNKNOWN'}</span></td>
-          <td>${item.integration_id || '—'}</td>
-          <td>${item.target_id || '—'}</td>
+          <td>${escapeHtml(item.id)}</td>
+          <td>${escapeHtml(item.name || '—')}</td>
+          <td><span class="${severityClass}">${escapeHtml(item.severity || 'UNKNOWN')}</span></td>
+          <td>${escapeHtml(item.integration_id || '—')}</td>
+          <td>${assetDisplay}</td>
           <td>${formatDate(item.first_detected)}</td>
           <td><span class="${statusClass}">${statusIcon} ${statusLabel}</span></td>
         </tr>
@@ -496,9 +528,10 @@ const renderDetails = (vulnerability, remediations) => {
 
 const renderAssets = () => {
   const searchTerm = state.assetSearchTerm.toLowerCase();
-  const filteredAssets = state.assets.filter((asset) =>
-    asset.assetId?.toLowerCase().includes(searchTerm)
-  );
+  const filteredAssets = state.assets.filter((asset) => {
+    const haystack = `${asset.assetId || ''} ${asset.assetName || ''}`.toLowerCase();
+    return haystack.includes(searchTerm);
+  });
 
   if (!filteredAssets.length) {
     elements.assetList.innerHTML = '<li style="padding: 2rem; text-align: center; color: rgba(148, 163, 184, 0.6);">No assets found</li>';
@@ -517,10 +550,23 @@ const renderAssets = () => {
   elements.assetList.innerHTML = paginatedAssets
     .map((asset) => {
       const isSelected = state.selectedAsset === asset.assetId ? 'selected' : '';
+      const displayName = asset.assetName || asset.assetId || 'Unknown Asset';
+      const idLine =
+        asset.assetName && asset.assetId
+          ? `<div class="item-id">${escapeHtml(asset.assetId)}</div>`
+          : '';
+      const metaParts = [];
+      if (asset.assetType) metaParts.push(asset.assetType);
+      if (asset.assetPlatform) metaParts.push(asset.assetPlatform);
+      if (asset.assetEnvironment) metaParts.push(asset.assetEnvironment);
+      const metaLine = metaParts.length ? `<div class="item-meta">${escapeHtml(metaParts.join(' · '))}</div>` : '';
+      const lastSeen = asset.lastSeen ? ` • Last seen ${formatDate(asset.lastSeen)}` : '';
       return `
         <li class="${isSelected}" data-asset-id="${escapeHtml(asset.assetId)}">
-          <div class="item-name">${escapeHtml(asset.assetId) || 'Unknown Asset'}</div>
-          <div class="item-count">${formatNumber(asset.vulnerabilityCount)} vulnerabilities (${formatNumber(asset.activeCount)} active, ${formatNumber(asset.remediatedCount)} remediated)</div>
+          <div class="item-name">${escapeHtml(displayName)}</div>
+          ${idLine}
+          ${metaLine}
+          <div class="item-count">${formatNumber(asset.vulnerabilityCount)} vulnerabilities (${formatNumber(asset.activeCount)} active, ${formatNumber(asset.remediatedCount)} remediated)${lastSeen}</div>
         </li>
       `;
     })
@@ -536,14 +582,69 @@ const renderAssets = () => {
   elements.nextAssetPage.disabled = end >= filteredAssets.length;
 };
 
-const renderAssetVulnerabilities = (vulnerabilities) => {
+const renderAssetMetadata = (assetId, assetDetails) => {
+  if (!elements.assetMetaCard) {
+    return;
+  }
+
+  if (!assetId) {
+    elements.assetMetaName.textContent = 'No asset selected';
+    elements.assetMetaId.textContent = 'Choose an asset from the list';
+    elements.assetMetaIntegration.textContent = '—';
+    elements.assetMetaOwner.textContent = '—';
+    elements.assetMetaType.textContent = '—';
+    elements.assetMetaEnvironment.textContent = '—';
+    elements.assetMetaPlatform.textContent = '—';
+    elements.assetMetaLastSeen.textContent = '—';
+    elements.assetMetaBadges.innerHTML = '';
+    return;
+  }
+
+  const summary = state.assets.find((asset) => asset.assetId === assetId) || {};
+  const metadata = assetDetails ?? state.assetDetails.get(assetId) ?? null;
+  const displayName = metadata?.name || summary.assetName || assetId || 'Unknown Asset';
+  const externalIdentifier = metadata?.external_identifier || summary.externalIdentifier || '';
+  const integrationId = metadata?.integration_id || summary.assetIntegrationId || '';
+  const integrationType = metadata?.integration_type || summary.assetIntegrationType || '';
+  const owner =
+    metadata?.primary_owner ||
+    (Array.isArray(metadata?.owners) ? metadata.owners[0] : null) ||
+    summary.primaryOwner ||
+    '—';
+  const risk = metadata?.risk_level;
+  const subtype = metadata?.asset_subtype || summary.assetSubtype;
+
+  const badgeValues = [risk, subtype].filter(Boolean);
+  elements.assetMetaBadges.innerHTML = badgeValues
+    .map((badge) => `<span class="asset-badge">${escapeHtml(String(badge))}</span>`)
+    .join('');
+
+  elements.assetMetaName.textContent = displayName;
+  elements.assetMetaId.textContent = externalIdentifier
+    ? `${assetId} • ${externalIdentifier}`
+    : assetId;
+  elements.assetMetaIntegration.textContent = [integrationType, integrationId].filter(Boolean).join(' • ') || '—';
+  elements.assetMetaOwner.textContent = owner || '—';
+  elements.assetMetaType.textContent =
+    metadata?.asset_type || summary.assetType || '—';
+  elements.assetMetaEnvironment.textContent =
+    metadata?.environment || summary.assetEnvironment || '—';
+  elements.assetMetaPlatform.textContent =
+    metadata?.platform || summary.assetPlatform || '—';
+  const lastSeen = metadata?.last_seen || summary.lastSeen;
+  elements.assetMetaLastSeen.textContent = lastSeen ? formatDateTime(lastSeen) : '—';
+};
+
+const renderAssetVulnerabilities = (vulnerabilities, assetDetails) => {
   if (!state.selectedAsset) {
     elements.assetVulnTable.innerHTML = '<tr><td colspan="4" style="text-align: center; padding: 2rem; color: rgba(148, 163, 184, 0.6);">Select an asset to view vulnerabilities</td></tr>';
     elements.assetVulnTitle.textContent = 'Select an asset';
+    renderAssetMetadata(null, null);
     return;
   }
 
   elements.assetVulnTitle.textContent = `Vulnerabilities for ${state.selectedAsset}`;
+  renderAssetMetadata(state.selectedAsset, assetDetails);
 
   if (!vulnerabilities || !vulnerabilities.length) {
     elements.assetVulnTable.innerHTML = '<tr><td colspan="4" style="text-align: center; padding: 2rem; color: rgba(148, 163, 184, 0.6);">No vulnerabilities found</td></tr>';
@@ -636,10 +737,13 @@ const renderCVEAssets = (assets) => {
       const statusClass = isRemediated ? 'status-chip remediated' : 'status-chip active';
       const statusIcon = isRemediated ? '✓' : '●';
       const severityClass = asset.severity ? `severity-chip ${escapeHtml(asset.severity)}` : '';
+      const assetDisplay = asset.assetName
+        ? `<div>${escapeHtml(asset.assetName)}</div><span class="table-subtext">${escapeHtml(asset.assetId || '—')}</span>`
+        : escapeHtml(asset.assetId || '—');
       return `
         <tr data-vuln-id="${escapeHtml(asset.id)}">
-          <td>${escapeHtml(asset.assetId) || '—'}</td>
-          <td><span class="${severityClass}">${escapeHtml(asset.severity) || 'UNKNOWN'}</span></td>
+          <td>${assetDisplay}</td>
+          <td><span class="${severityClass}">${escapeHtml(asset.severity || 'UNKNOWN')}</span></td>
           <td>${formatDate(asset.first_detected)}</td>
           <td><span class="${statusClass}">${statusIcon} ${statusLabel}</span></td>
         </tr>
@@ -724,6 +828,11 @@ const loadAssets = async () => {
       renderAssets();
       if (!state.selectedAsset) {
         renderAssetVulnerabilities(null);
+      } else if (state.assets.every((asset) => asset.assetId !== state.selectedAsset)) {
+        state.selectedAsset = null;
+        renderAssetVulnerabilities(null);
+      } else {
+        renderAssetMetadata(state.selectedAsset, state.assetDetails.get(state.selectedAsset) || null);
       }
       return;
     }
@@ -742,6 +851,11 @@ const loadAssets = async () => {
     renderAssets();
     if (!state.selectedAsset) {
       renderAssetVulnerabilities(null);
+    } else if (state.assets.every((asset) => asset.assetId !== state.selectedAsset)) {
+      state.selectedAsset = null;
+      renderAssetVulnerabilities(null);
+    } else {
+      renderAssetMetadata(state.selectedAsset, state.assetDetails.get(state.selectedAsset) || null);
     }
   } catch (error) {
     console.error('Failed to load assets:', error);
@@ -754,13 +868,24 @@ const selectAsset = async (assetId) => {
   try {
     state.selectedAsset = assetId;
     renderAssets();
+    renderAssetMetadata(assetId, state.assetDetails.get(assetId) || null);
     elements.assetVulnTable.innerHTML = '<tr><td colspan="4" style="text-align: center; padding: 2rem;">Loading vulnerabilities...</td></tr>';
-    const vulnerabilities = await window.vanta.getVulnerabilitiesByAsset(assetId, state.filters);
-    renderAssetVulnerabilities(vulnerabilities);
+
+    const [vulnerabilities, assetDetails] = await Promise.all([
+      window.vanta.getVulnerabilitiesByAsset(assetId, state.filters),
+      window.vanta.getAssetDetails(assetId).catch(() => null),
+    ]);
+
+    if (assetDetails) {
+      state.assetDetails.set(assetId, assetDetails);
+    }
+
+    renderAssetVulnerabilities(vulnerabilities, assetDetails || null);
   } catch (error) {
     console.error('Failed to load asset vulnerabilities:', error);
     showToast(`Failed to load vulnerabilities for asset: ${error.message}`);
     elements.assetVulnTable.innerHTML = '<tr><td colspan="4" style="text-align: center; padding: 2rem; color: rgba(248, 113, 113, 0.8);">Failed to load vulnerabilities</td></tr>';
+    renderAssetMetadata(null, null);
   }
 };
 
@@ -1327,6 +1452,17 @@ const attachEventListeners = () => {
 
       // Reload statistics and vulnerabilities with the new database
       await Promise.all([loadStatistics(), loadVulnerabilities(), loadSyncHistory()]);
+      state.assetCache = null;
+      state.assetCacheFilters = null;
+      state.cveCache = null;
+      state.cveCacheFilters = null;
+      if (state.assetDetails?.clear) {
+        state.assetDetails.clear();
+      }
+      state.selectedAsset = null;
+      state.selectedCve = null;
+      renderAssetVulnerabilities(null);
+      renderCVEAssets(null);
 
       setTimeout(() => {
         elements.databaseStatus.style.display = 'none';
@@ -1357,6 +1493,17 @@ const attachEventListeners = () => {
 
       // Reload statistics and vulnerabilities with the default database
       await Promise.all([loadStatistics(), loadVulnerabilities(), loadSyncHistory()]);
+      state.assetCache = null;
+      state.assetCacheFilters = null;
+      state.cveCache = null;
+      state.cveCacheFilters = null;
+      if (state.assetDetails?.clear) {
+        state.assetDetails.clear();
+      }
+      state.selectedAsset = null;
+      state.selectedCve = null;
+      renderAssetVulnerabilities(null);
+      renderCVEAssets(null);
 
       setTimeout(() => {
         elements.databaseStatus.style.display = 'none';
@@ -1429,9 +1576,16 @@ const attachEventListeners = () => {
     state.assetCacheFilters = null;
     state.cveCache = null;
     state.cveCacheFilters = null;
+    if (state.assetDetails?.clear) {
+      state.assetDetails.clear();
+    }
+    state.selectedAsset = null;
+    state.selectedCve = null;
 
     await Promise.all([loadStatistics(), loadVulnerabilities()]);
     resetDetails();
+    renderAssetVulnerabilities(null);
+    renderCVEAssets(null);
   });
 
   elements.clearFilters.addEventListener('click', async () => {
@@ -1444,9 +1598,16 @@ const attachEventListeners = () => {
     state.assetCacheFilters = null;
     state.cveCache = null;
     state.cveCacheFilters = null;
+    if (state.assetDetails?.clear) {
+      state.assetDetails.clear();
+    }
+    state.selectedAsset = null;
+    state.selectedCve = null;
 
     await Promise.all([loadStatistics(), loadVulnerabilities()]);
     resetDetails();
+    renderAssetVulnerabilities(null);
+    renderCVEAssets(null);
   });
 
   elements.prevPage.addEventListener('click', async () => {
@@ -1476,14 +1637,46 @@ const attachEventListeners = () => {
     // Progress is now tracked in sync history
   });
 
-  window.vanta.onSyncIncremental(async ({ type, stats, flushed }) => {
-    // Refresh statistics and vulnerability list to show updated data
-    await Promise.all([loadStatistics(), loadVulnerabilities(), loadSyncHistory()]);
+  window.vanta.onSyncIncremental(async () => {
+    // Invalidate caches so explorer views refresh with synced data
+    state.assetCache = null;
+    state.assetCacheFilters = null;
+    state.cveCache = null;
+    state.cveCacheFilters = null;
+    if (state.assetDetails?.clear) {
+      state.assetDetails.clear();
+    }
+
+    const tasks = [loadStatistics(), loadVulnerabilities(), loadSyncHistory()];
+    if (state.explorerTab === 'by-asset') {
+      tasks.push(loadAssets());
+    }
+    if (state.explorerTab === 'by-cve') {
+      tasks.push(loadCVEs());
+    }
+
+    await Promise.all(tasks);
   });
 
   window.vanta.onSyncCompleted(async () => {
     updateSyncButtons('idle');
-    await Promise.all([loadStatistics(), loadVulnerabilities(), loadSyncHistory()]);
+    state.assetCache = null;
+    state.assetCacheFilters = null;
+    state.cveCache = null;
+    state.cveCacheFilters = null;
+    if (state.assetDetails?.clear) {
+      state.assetDetails.clear();
+    }
+
+    const tasks = [loadStatistics(), loadVulnerabilities(), loadSyncHistory()];
+    if (state.explorerTab === 'by-asset') {
+      tasks.push(loadAssets());
+    }
+    if (state.explorerTab === 'by-cve') {
+      tasks.push(loadCVEs());
+    }
+
+    await Promise.all(tasks);
   });
 
   window.vanta.onSyncError((payload) => {

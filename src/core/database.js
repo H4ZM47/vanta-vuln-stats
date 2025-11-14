@@ -86,17 +86,50 @@ class VulnerabilityDatabase {
           updated_at = excluded.updated_at,
           raw_data = excluded.raw_data
       `),
+      selectAssetRaw: this.db.prepare('SELECT raw_data FROM assets WHERE id = ?'),
+      upsertAsset: this.db.prepare(`
+        INSERT INTO assets (
+          id, name, description, asset_type, asset_subtype, integration_id, integration_type,
+          environment, platform, primary_owner, owners, external_identifier, risk_level,
+          first_seen, last_seen, tags, created_at, updated_at, raw_data
+        ) VALUES (
+          @id, @name, @description, @asset_type, @asset_subtype, @integration_id, @integration_type,
+          @environment, @platform, @primary_owner, @owners, @external_identifier, @risk_level,
+          @first_seen, @last_seen, @tags, @created_at, @updated_at, @raw_data
+        )
+        ON CONFLICT(id) DO UPDATE SET
+          name = excluded.name,
+          description = excluded.description,
+          asset_type = excluded.asset_type,
+          asset_subtype = excluded.asset_subtype,
+          integration_id = excluded.integration_id,
+          integration_type = excluded.integration_type,
+          environment = excluded.environment,
+          platform = excluded.platform,
+          primary_owner = excluded.primary_owner,
+          owners = excluded.owners,
+          external_identifier = excluded.external_identifier,
+          risk_level = excluded.risk_level,
+          first_seen = excluded.first_seen,
+          last_seen = excluded.last_seen,
+          tags = excluded.tags,
+          created_at = excluded.created_at,
+          updated_at = excluded.updated_at,
+          raw_data = excluded.raw_data
+      `),
       insertSync: this.db.prepare(`
         INSERT INTO sync_history (
           sync_date,
           vulnerabilities_count, vulnerabilities_new, vulnerabilities_updated, vulnerabilities_remediated,
           remediations_count, remediations_new, remediations_updated,
+          assets_count, assets_new, assets_updated,
           new_count, updated_count, remediated_count
         )
         VALUES (
           @sync_date,
           @vulnerabilities_count, @vulnerabilities_new, @vulnerabilities_updated, @vulnerabilities_remediated,
           @remediations_count, @remediations_new, @remediations_updated,
+          @assets_count, @assets_new, @assets_updated,
           @new_count, @updated_count, @remediated_count
         )
       `),
@@ -108,6 +141,7 @@ class VulnerabilityDatabase {
           details,
           vulnerabilities_count, vulnerabilities_new, vulnerabilities_updated, vulnerabilities_remediated,
           remediations_count, remediations_new, remediations_updated,
+          assets_count, assets_new, assets_updated,
           new_count, updated_count, remediated_count
         )
         VALUES (
@@ -117,6 +151,7 @@ class VulnerabilityDatabase {
           @details,
           @vulnerabilities_count, @vulnerabilities_new, @vulnerabilities_updated, @vulnerabilities_remediated,
           @remediations_count, @remediations_new, @remediations_updated,
+          @assets_count, @assets_new, @assets_updated,
           @new_count, @updated_count, @remediated_count
         )
       `),
@@ -170,6 +205,30 @@ class VulnerabilityDatabase {
     `);
 
     this.db.exec(`
+      CREATE TABLE IF NOT EXISTS assets (
+        id TEXT PRIMARY KEY,
+        name TEXT,
+        description TEXT,
+        asset_type TEXT,
+        asset_subtype TEXT,
+        integration_id TEXT,
+        integration_type TEXT,
+        environment TEXT,
+        platform TEXT,
+        primary_owner TEXT,
+        owners TEXT,
+        external_identifier TEXT,
+        risk_level TEXT,
+        first_seen TEXT,
+        last_seen TEXT,
+        tags TEXT,
+        created_at TEXT,
+        updated_at TEXT NOT NULL,
+        raw_data TEXT NOT NULL
+      );
+    `);
+
+    this.db.exec(`
       CREATE TABLE IF NOT EXISTS sync_history (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         sync_date TEXT NOT NULL,
@@ -198,6 +257,8 @@ class VulnerabilityDatabase {
     this.db.exec('CREATE INDEX IF NOT EXISTS idx_vulnerabilities_fixable ON vulnerabilities(is_fixable);');
     this.db.exec('CREATE INDEX IF NOT EXISTS idx_vulnerabilities_integration ON vulnerabilities(integration_id);');
     this.db.exec('CREATE INDEX IF NOT EXISTS idx_remediations_vulnerability ON vulnerability_remediations(vulnerability_id);');
+    this.db.exec('CREATE INDEX IF NOT EXISTS idx_assets_integration ON assets(integration_id);');
+    this.db.exec('CREATE INDEX IF NOT EXISTS idx_assets_type ON assets(asset_type);');
   }
 
   _migrateSyncHistoryColumns() {
@@ -287,6 +348,120 @@ class VulnerabilityDatabase {
       raw_data: JSON.stringify(remediation),
     };
     return data;
+  }
+
+  _safeStringify(value) {
+    if (value === undefined || value === null) {
+      return null;
+    }
+    try {
+      return JSON.stringify(value);
+    } catch (error) {
+      console.warn('[VulnerabilityDatabase] Failed to stringify asset column', error);
+      return null;
+    }
+  }
+
+  _normalizeOwnerList(ownerValue) {
+    if (!ownerValue) {
+      return [];
+    }
+
+    const normalizeEntry = (entry) => {
+      if (!entry) return null;
+      if (typeof entry === 'string') return entry;
+      if (typeof entry === 'number' || typeof entry === 'boolean') return String(entry);
+      if (typeof entry === 'object') {
+        return entry.name || entry.email || entry.handle || entry.id || null;
+      }
+      return null;
+    };
+
+    if (Array.isArray(ownerValue)) {
+      return ownerValue.map(normalizeEntry).filter(Boolean);
+    }
+    const normalized = normalizeEntry(ownerValue);
+    return normalized ? [normalized] : [];
+  }
+
+  _normalizeTags(tagValue) {
+    if (!tagValue) {
+      return [];
+    }
+
+    const flatten = Array.isArray(tagValue) ? tagValue : [tagValue];
+    return flatten
+      .map((tag) => {
+        if (!tag) return null;
+        if (typeof tag === 'string') return tag;
+        if (typeof tag === 'number' || typeof tag === 'boolean') return String(tag);
+        if (Array.isArray(tag)) {
+          return tag
+            .map((nested) => (typeof nested === 'string' ? nested : this._safeStringify(nested)))
+            .join(',');
+        }
+        if (typeof tag === 'object') {
+          return tag.name || tag.label || tag.value || JSON.stringify(tag);
+        }
+        return null;
+      })
+      .filter(Boolean);
+  }
+
+  _normaliseAsset(asset) {
+    if (!asset?.id) {
+      return null;
+    }
+
+    const owners = this._normalizeOwnerList(asset.owners ?? asset.owner ?? asset.assignedUsers ?? asset.ownerList);
+    const tags = this._normalizeTags(asset.tags ?? asset.labels ?? asset.tagList);
+    const displayName =
+      asset.displayName ??
+      asset.name ??
+      asset.assetName ??
+      asset.resourceName ??
+      asset.title ??
+      null;
+    const description = asset.description ?? asset.summary ?? asset.notes ?? null;
+    const assetType = asset.assetType ?? asset.resourceType ?? null;
+    const assetSubtype = asset.assetSubtype ?? asset.resourceSubtype ?? null;
+    const integrationId = asset.integrationId ?? asset.integration?.id ?? null;
+    const integrationType = asset.integrationType ?? asset.integration?.type ?? null;
+    const environment = asset.environment ?? asset.environmentName ?? asset.environmentType ?? null;
+    const platform = asset.platform ?? asset.platformName ?? asset.operatingSystem ?? asset.os ?? null;
+    const externalIdentifier =
+      asset.externalIdentifier ??
+      asset.resourceIdentifier ??
+      asset.uniqueIdentifier ??
+      asset.slug ??
+      null;
+    const riskLevel = asset.riskLevel ?? asset.risk ?? null;
+    const firstSeen = asset.firstSeen ?? asset.firstSeenAt ?? asset.firstSeenOn ?? null;
+    const lastSeen = asset.lastSeen ?? asset.lastSeenAt ?? asset.lastSeenDate ?? asset.lastSeenOn ?? null;
+    const createdAt = asset.createdAt ?? asset.createdDate ?? asset.createdOn ?? null;
+    const now = dayjs().toISOString();
+
+    return {
+      id: asset.id,
+      name: displayName,
+      description,
+      asset_type: assetType,
+      asset_subtype: assetSubtype,
+      integration_id: integrationId,
+      integration_type: integrationType,
+      environment,
+      platform,
+      primary_owner: owners.length ? owners[0] : null,
+      owners: owners.length ? this._safeStringify(owners) : null,
+      external_identifier: externalIdentifier,
+      risk_level: riskLevel,
+      first_seen: firstSeen,
+      last_seen: lastSeen,
+      tags: tags.length ? this._safeStringify(tags) : null,
+      created_at: createdAt,
+      updated_at: now,
+      raw_data: JSON.stringify(asset),
+    };
   }
 
   storeVulnerabilities(vulnerabilities) {
@@ -461,7 +636,57 @@ class VulnerabilityDatabase {
     return tx(remediations);
   }
 
-  buildFilters(filters = {}) {
+  storeAssetsBatch(assets = []) {
+    const tx = this.db.transaction((rows) => {
+      if (!rows.length) {
+        return { new: 0, updated: 0, total: 0 };
+      }
+
+      const ids = rows.filter((row) => row?.id).map((row) => row.id);
+      if (!ids.length) {
+        return { new: 0, updated: 0, total: 0 };
+      }
+
+      const placeholders = ids.map(() => '?').join(',');
+      const existingRecords = this.db
+        .prepare(`SELECT id, raw_data FROM assets WHERE id IN (${placeholders})`)
+        .all(...ids);
+      const existingMap = new Map(existingRecords.map((record) => [record.id, record.raw_data]));
+
+      let newCount = 0;
+      let updatedCount = 0;
+
+      rows.forEach((row) => {
+        if (!row?.id) {
+          return;
+        }
+
+        const payload = this._normaliseAsset(row);
+        if (!payload) {
+          return;
+        }
+
+        const existingRaw = existingMap.get(row.id);
+        if (!existingRaw) {
+          newCount += 1;
+        } else if (existingRaw !== payload.raw_data) {
+          updatedCount += 1;
+        }
+
+        this.statements.upsertAsset.run(payload);
+        existingMap.set(row.id, payload.raw_data);
+      });
+
+      return { new: newCount, updated: updatedCount, total: rows.length };
+    });
+
+    return tx(assets);
+  }
+
+  buildFilters(filters = {}, options = {}) {
+    const alias = options.alias || null;
+    const column = (name) => (alias ? `${alias}.${name}` : name);
+    const tableRef = alias || 'vulnerabilities';
     const clauses = [];
     const params = {};
 
@@ -470,63 +695,63 @@ class VulnerabilityDatabase {
       filters.severity.forEach((value, idx) => {
         params[`severity${idx}`] = value;
       });
-      clauses.push(`severity IN (${placeholders.join(',')})`);
+      clauses.push(`${column('severity')} IN (${placeholders.join(',')})`);
     }
 
     if (filters.status === 'active') {
-      clauses.push('deactivated_on IS NULL');
+      clauses.push(`${column('deactivated_on')} IS NULL`);
     } else if (filters.status === 'deactivated') {
       // "Remediated" means the vulnerability has at least one remediation record with a remediation_date
       clauses.push(`EXISTS (
         SELECT 1 FROM vulnerability_remediations vr
-        WHERE vr.vulnerability_id = vulnerabilities.id
+        WHERE vr.vulnerability_id = ${tableRef}.id
         AND vr.remediation_date IS NOT NULL
       )`);
     }
 
     if (filters.fixable === 'fixable') {
-      clauses.push('is_fixable = 1');
+      clauses.push(`${column('is_fixable')} = 1`);
     } else if (filters.fixable === 'not_fixable') {
-      clauses.push('is_fixable = 0');
+      clauses.push(`${column('is_fixable')} = 0`);
     }
 
     if (filters.integration) {
-      clauses.push('integration_id LIKE @integration');
+      clauses.push(`${column('integration_id')} LIKE @integration`);
       params.integration = `%${filters.integration}%`;
     }
 
     if (filters.assetId) {
-      clauses.push('target_id = @assetId');
+      clauses.push(`${column('target_id')} = @assetId`);
       params.assetId = filters.assetId;
     }
 
     if (filters.cve) {
-      clauses.push('(name LIKE @cve OR related_vulns LIKE @cve)');
+      clauses.push(`(${column('name')} LIKE @cve OR ${column('related_vulns')} LIKE @cve)`);
       params.cve = `%${filters.cve}%`;
     }
 
     if (filters.search) {
-      clauses.push('(name LIKE @search OR description LIKE @search OR id LIKE @search)');
+      clauses.push(`(${column('name')} LIKE @search OR ${column('description')} LIKE @search OR ${column('id')} LIKE @search)`);
       params.search = `%${filters.search}%`;
     }
 
     if (filters.dateIdentifiedStart) {
-      clauses.push('first_detected >= @dateIdentifiedStart');
+      clauses.push(`${column('first_detected')} >= @dateIdentifiedStart`);
       params.dateIdentifiedStart = filters.dateIdentifiedStart;
     }
 
     if (filters.dateIdentifiedEnd) {
-      clauses.push('first_detected <= @dateIdentifiedEnd');
+      clauses.push(`${column('first_detected')} <= @dateIdentifiedEnd`);
       params.dateIdentifiedEnd = filters.dateIdentifiedEnd;
     }
 
     if (filters.dateRemediatedStart) {
-      clauses.push('deactivated_on >= @dateRemediatedStart');
+      clauses.push(`${column('deactivated_on')} >= @dateRemediatedStart`);
       params.dateRemediatedStart = filters.dateRemediatedStart;
     }
 
     if (filters.dateRemediatedEnd) {
-      clauses.push('deactivated_on <= @dateRemediatedEnd');
+      clauses.push(`${column('deactivated_on')} <= @dateRemediatedEnd`);
       params.dateRemediatedEnd = filters.dateRemediatedEnd;
     }
 
@@ -535,21 +760,22 @@ class VulnerabilityDatabase {
   }
 
   getVulnerabilities({ filters = {}, limit = 100, offset = 0, sortColumn = 'first_detected', sortDirection = 'desc' } = {}) {
-    const { where, params } = this.buildFilters(filters);
+    const { where, params } = this.buildFilters(filters, { alias: 'v' });
 
     // Map of allowed sort columns to prevent SQL injection
     const allowedColumns = {
-      id: 'id',
-      name: 'name',
-      severity: 'severity',
-      integration_id: 'integration_id',
-      target_id: 'target_id',
-      first_detected: 'first_detected',
-      status: 'deactivated_on', // Special case: status is based on deactivated_on
+      id: 'v.id',
+      name: 'v.name',
+      severity: 'v.severity',
+      integration_id: 'v.integration_id',
+      target_id: 'v.target_id',
+      first_detected: 'v.first_detected',
+      last_detected: 'v.last_detected',
+      status: 'v.deactivated_on', // Special case: status is based on deactivated_on
     };
 
     // Validate and sanitize sort column
-    const actualColumn = allowedColumns[sortColumn] || 'first_detected';
+    const actualColumn = allowedColumns[sortColumn] || 'v.first_detected';
 
     // Validate sort direction
     const direction = sortDirection.toLowerCase() === 'asc' ? 'ASC' : 'DESC';
@@ -559,11 +785,11 @@ class VulnerabilityDatabase {
     if (sortColumn === 'status') {
       // For status, sort by whether deactivated_on is null (Active vs Remediated)
       // NULL first means Active first when DESC, Remediated first when ASC
-      orderBy = `ORDER BY (deactivated_on IS NULL) ${direction}, name ASC`;
+      orderBy = `ORDER BY (v.deactivated_on IS NULL) ${direction}, v.name ASC`;
     } else if (sortColumn === 'severity') {
       // For severity, use explicit ordering: CRITICAL→HIGH→MEDIUM→LOW→INFO→UNKNOWN
       orderBy = `ORDER BY
-        CASE severity
+        CASE v.severity
           WHEN 'CRITICAL' THEN 1
           WHEN 'HIGH' THEN 2
           WHEN 'MEDIUM' THEN 3
@@ -571,17 +797,28 @@ class VulnerabilityDatabase {
           WHEN 'INFO' THEN 5
           ELSE 6
         END ${direction},
-        name ASC`;
+        v.name ASC`;
     } else {
       // Handle NULL values properly - put them at the end
-      orderBy = `ORDER BY (${actualColumn} IS NULL), ${actualColumn} ${direction}, name ASC`;
+      orderBy = `ORDER BY (${actualColumn} IS NULL), ${actualColumn} ${direction}, v.name ASC`;
     }
 
     const query = `
-      SELECT id, name, description, integration_id, target_id, severity, first_detected,
-             last_detected, deactivated_on, is_fixable, cvss_score, package_identifier,
-             vulnerability_type, remediate_by, external_url, scan_source
-      FROM vulnerabilities
+      SELECT v.id, v.name, v.description, v.integration_id, v.target_id, v.severity, v.first_detected,
+             v.last_detected, v.deactivated_on, v.is_fixable, v.cvss_score, v.package_identifier,
+             v.vulnerability_type, v.remediate_by, v.external_url, v.scan_source,
+             a.name AS asset_name,
+             a.asset_type AS asset_type,
+             a.asset_subtype AS asset_subtype,
+             a.platform AS asset_platform,
+             a.environment AS asset_environment,
+             a.primary_owner AS asset_owner,
+             a.integration_id AS asset_integration_id,
+             a.integration_type AS asset_integration_type,
+             a.external_identifier AS asset_external_identifier,
+             a.last_seen AS asset_last_seen
+      FROM vulnerabilities v
+      LEFT JOIN assets a ON a.id = v.target_id
       ${where}
       ${orderBy}
       LIMIT @limit OFFSET @offset;
@@ -591,8 +828,8 @@ class VulnerabilityDatabase {
   }
 
   getVulnerabilityCount(filters = {}) {
-    const { where, params } = this.buildFilters(filters);
-    const stmt = this.db.prepare(`SELECT COUNT(*) as count FROM vulnerabilities ${where};`);
+    const { where, params } = this.buildFilters(filters, { alias: 'v' });
+    const stmt = this.db.prepare(`SELECT COUNT(*) as count FROM vulnerabilities v ${where};`);
     const row = stmt.get(params);
     return row?.count ?? 0;
   }
@@ -612,15 +849,15 @@ class VulnerabilityDatabase {
   }
 
   getStatistics(filters = {}) {
-    const { where, params } = this.buildFilters(filters);
+    const { where, params } = this.buildFilters(filters, { alias: 'v' });
 
-    const total = this.db.prepare(`SELECT COUNT(*) as count FROM vulnerabilities ${where};`).get(params)?.count ?? 0;
+    const total = this.db.prepare(`SELECT COUNT(*) as count FROM vulnerabilities v ${where};`).get(params)?.count ?? 0;
 
     const severityRows = this.db.prepare(`
-      SELECT severity, COUNT(*) as count
-      FROM vulnerabilities
+      SELECT v.severity, COUNT(*) as count
+      FROM vulnerabilities v
       ${where}
-      GROUP BY severity;
+      GROUP BY v.severity;
     `).all(params);
     const bySeverity = severityRows.reduce((acc, row) => {
       acc[row.severity || 'UNKNOWN'] = row.count;
@@ -628,10 +865,10 @@ class VulnerabilityDatabase {
     }, {});
 
     const integrationRows = this.db.prepare(`
-      SELECT integration_id, COUNT(*) as count
-      FROM vulnerabilities
+      SELECT v.integration_id, COUNT(*) as count
+      FROM vulnerabilities v
       ${where}
-      GROUP BY integration_id;
+      GROUP BY v.integration_id;
     `).all(params);
     const byIntegration = integrationRows.reduce((acc, row) => {
       acc[row.integration_id || 'UNKNOWN'] = row.count;
@@ -639,10 +876,10 @@ class VulnerabilityDatabase {
     }, {});
 
     const fixabilityRows = this.db.prepare(`
-      SELECT is_fixable, COUNT(*) as count
-      FROM vulnerabilities
+      SELECT v.is_fixable, COUNT(*) as count
+      FROM vulnerabilities v
       ${where}
-      GROUP BY is_fixable;
+      GROUP BY v.is_fixable;
     `).all(params);
     const fixable = fixabilityRows.find((row) => row.is_fixable === 1)?.count ?? 0;
     const notFixable = fixabilityRows.find((row) => row.is_fixable === 0)?.count ?? 0;
@@ -654,13 +891,13 @@ class VulnerabilityDatabase {
         CASE
           WHEN EXISTS (
             SELECT 1 FROM vulnerability_remediations vr
-            WHERE vr.vulnerability_id = vulnerabilities.id
+            WHERE vr.vulnerability_id = v.id
             AND vr.remediation_date IS NOT NULL
           ) THEN 'remediated'
           ELSE 'active'
         END as status,
         COUNT(*) as count
-      FROM vulnerabilities
+      FROM vulnerabilities v
       ${where}
       GROUP BY status;
     `).all(params);
@@ -669,18 +906,18 @@ class VulnerabilityDatabase {
 
     const uniques = this.db.prepare(`
       SELECT
-        COUNT(DISTINCT target_id) as assets,
-        COUNT(DISTINCT name) as cves
-      FROM vulnerabilities
+        COUNT(DISTINCT v.target_id) as assets,
+        COUNT(DISTINCT v.name) as cves
+      FROM vulnerabilities v
       ${where};
     `).get(params);
 
-    const cvssWhere = where ? `${where} AND cvss_score IS NOT NULL` : 'WHERE cvss_score IS NOT NULL';
+    const cvssWhere = where ? `${where} AND v.cvss_score IS NOT NULL` : 'WHERE v.cvss_score IS NOT NULL';
     const averages = this.db.prepare(`
-      SELECT severity, AVG(cvss_score) as average
-      FROM vulnerabilities
+      SELECT v.severity, AVG(v.cvss_score) as average
+      FROM vulnerabilities v
       ${cvssWhere}
-      GROUP BY severity;
+      GROUP BY v.severity;
     `).all(params);
     const averageCvssBySeverity = averages.reduce((acc, row) => {
       if (row.severity) {
@@ -717,22 +954,33 @@ class VulnerabilityDatabase {
    * @returns {Array} Array of assets with counts
    */
   getAssets(filters = {}) {
-    const { where, params } = this.buildFilters(filters);
-    // Add NULL filtering for target_id
+    const { where, params } = this.buildFilters(filters, { alias: 'v' });
     const whereClause = where
-      ? `${where} AND target_id IS NOT NULL`
-      : 'WHERE target_id IS NOT NULL';
+      ? `${where} AND v.target_id IS NOT NULL`
+      : 'WHERE v.target_id IS NOT NULL';
 
     const query = `
       SELECT
-        target_id as assetId,
+        v.target_id as assetId,
+        MAX(a.name) as assetName,
+        MAX(a.asset_type) as assetType,
+        MAX(a.asset_subtype) as assetSubtype,
+        MAX(a.integration_id) as assetIntegrationId,
+        MAX(a.integration_type) as assetIntegrationType,
+        MAX(a.platform) as assetPlatform,
+        MAX(a.environment) as assetEnvironment,
+        MAX(a.primary_owner) as primaryOwner,
+        MAX(a.external_identifier) as externalIdentifier,
+        MAX(a.last_seen) as lastSeen,
         COUNT(*) as vulnerabilityCount,
-        SUM(CASE WHEN deactivated_on IS NULL THEN 1 ELSE 0 END) as activeCount,
-        SUM(CASE WHEN deactivated_on IS NOT NULL THEN 1 ELSE 0 END) as remediatedCount
-      FROM vulnerabilities
+        SUM(CASE WHEN v.deactivated_on IS NULL THEN 1 ELSE 0 END) as activeCount,
+        SUM(CASE WHEN v.deactivated_on IS NOT NULL THEN 1 ELSE 0 END) as remediatedCount
+      FROM vulnerabilities v
+      LEFT JOIN assets a ON a.id = v.target_id
       ${whereClause}
-      GROUP BY target_id
-      ORDER BY vulnerabilityCount DESC, target_id ASC
+      GROUP BY v.target_id
+      ORDER BY vulnerabilityCount DESC,
+               COALESCE(assetName, v.target_id) ASC
     `;
     return this.db.prepare(query).all(params);
   }
@@ -745,21 +993,21 @@ class VulnerabilityDatabase {
    */
   getVulnerabilitiesByAsset(assetId, filters = {}) {
     const extendedFilters = { ...filters, assetId };
-    const { where, params } = this.buildFilters(extendedFilters);
+    const { where, params } = this.buildFilters(extendedFilters, { alias: 'v' });
     const query = `
-      SELECT id, name, description, severity, first_detected, deactivated_on,
-             is_fixable, cvss_score, integration_id
-      FROM vulnerabilities
+      SELECT v.id, v.name, v.description, v.severity, v.first_detected, v.deactivated_on,
+             v.is_fixable, v.cvss_score, v.integration_id
+      FROM vulnerabilities v
       ${where}
       ORDER BY
-        CASE severity
+        CASE v.severity
           WHEN 'CRITICAL' THEN 1
           WHEN 'HIGH' THEN 2
           WHEN 'MEDIUM' THEN 3
           WHEN 'LOW' THEN 4
           ELSE 5
         END ASC,
-        first_detected DESC
+        v.first_detected DESC
     `;
     return this.db.prepare(query).all(params);
   }
@@ -770,21 +1018,21 @@ class VulnerabilityDatabase {
    * @returns {Array} Array of CVEs with counts and descriptions
    */
   getCVEs(filters = {}) {
-    const { where, params } = this.buildFilters(filters);
+    const { where, params } = this.buildFilters(filters, { alias: 'v' });
     // Add NULL filtering for name (CVE) and fix MAX(severity) to use numeric ordering
     const whereClause = where
-      ? `${where} AND name IS NOT NULL`
-      : 'WHERE name IS NOT NULL';
+      ? `${where} AND v.name IS NOT NULL`
+      : 'WHERE v.name IS NOT NULL';
 
     const query = `
       SELECT
-        name as cveName,
-        MAX(description) as description,
+        v.name as cveName,
+        MAX(v.description) as description,
         COUNT(*) as vulnerabilityCount,
-        SUM(CASE WHEN deactivated_on IS NULL THEN 1 ELSE 0 END) as activeCount,
-        SUM(CASE WHEN deactivated_on IS NOT NULL THEN 1 ELSE 0 END) as remediatedCount,
+        SUM(CASE WHEN v.deactivated_on IS NULL THEN 1 ELSE 0 END) as activeCount,
+        SUM(CASE WHEN v.deactivated_on IS NOT NULL THEN 1 ELSE 0 END) as remediatedCount,
         MAX(
-          CASE severity
+          CASE v.severity
             WHEN 'CRITICAL' THEN 1
             WHEN 'HIGH' THEN 2
             WHEN 'MEDIUM' THEN 3
@@ -794,7 +1042,7 @@ class VulnerabilityDatabase {
           END
         ) as severityOrder,
         CASE MIN(
-          CASE severity
+          CASE v.severity
             WHEN 'CRITICAL' THEN 1
             WHEN 'HIGH' THEN 2
             WHEN 'MEDIUM' THEN 3
@@ -810,13 +1058,13 @@ class VulnerabilityDatabase {
           WHEN 5 THEN 'INFO'
           ELSE 'UNKNOWN'
         END as maxSeverity
-      FROM vulnerabilities
+      FROM vulnerabilities v
       ${whereClause}
-      GROUP BY name
+      GROUP BY v.name
       ORDER BY
         severityOrder ASC,
         vulnerabilityCount DESC,
-        name ASC
+        v.name ASC
     `;
     return this.db.prepare(query).all(params);
   }
@@ -829,23 +1077,65 @@ class VulnerabilityDatabase {
    */
   getAssetsByCVE(cveName, filters = {}) {
     const extendedFilters = { ...filters, cve: cveName };
-    const { where, params } = this.buildFilters(extendedFilters);
+    const { where, params } = this.buildFilters(extendedFilters, { alias: 'v' });
     const query = `
-      SELECT id, target_id as assetId, severity, first_detected, deactivated_on,
-             integration_id, is_fixable, cvss_score
-      FROM vulnerabilities
+      SELECT v.id, v.target_id as assetId, v.severity, v.first_detected, v.deactivated_on,
+             v.integration_id, v.is_fixable, v.cvss_score,
+             a.name as assetName,
+             a.asset_type as assetType,
+             a.platform as assetPlatform,
+             a.environment as assetEnvironment,
+             a.primary_owner as assetOwner,
+             a.last_seen as assetLastSeen
+      FROM vulnerabilities v
+      LEFT JOIN assets a ON a.id = v.target_id
       ${where}
       ORDER BY
-        CASE severity
+        CASE v.severity
           WHEN 'CRITICAL' THEN 1
           WHEN 'HIGH' THEN 2
           WHEN 'MEDIUM' THEN 3
           WHEN 'LOW' THEN 4
           ELSE 5
         END ASC,
-        first_detected DESC
+        v.first_detected DESC
     `;
     return this.db.prepare(query).all(params);
+  }
+
+  getAssetDetails(assetId) {
+    if (!assetId) {
+      return null;
+    }
+
+    const stmt = this.db.prepare(`
+      SELECT id, name, description, asset_type, asset_subtype, integration_id, integration_type,
+             environment, platform, primary_owner, owners, external_identifier, risk_level,
+             first_seen, last_seen, tags, created_at, updated_at, raw_data
+      FROM assets
+      WHERE id = ?
+    `);
+    const row = stmt.get(assetId);
+    if (!row) {
+      return null;
+    }
+
+    const safeParse = (value, fallback) => {
+      if (!value) return fallback;
+      try {
+        return JSON.parse(value);
+      } catch (error) {
+        console.warn('[VulnerabilityDatabase] Failed to parse JSON for asset detail', error);
+        return fallback;
+      }
+    };
+
+    return {
+      ...row,
+      owners: safeParse(row.owners, []),
+      tags: safeParse(row.tags, []),
+      raw_data: safeParse(row.raw_data, null),
+    };
   }
 
   _getRemediationStatistics(where, params) {
@@ -927,7 +1217,7 @@ class VulnerabilityDatabase {
     };
   }
 
-  recordSyncHistory(vulnerabilityStats, remediationStats) {
+  recordSyncHistory(vulnerabilityStats, remediationStats, assetStats = { new: 0, updated: 0, total: 0 }) {
     const now = dayjs().toISOString();
     this.statements.insertSync.run({
       sync_date: now,
@@ -938,6 +1228,9 @@ class VulnerabilityDatabase {
       remediations_count: remediationStats.total,
       remediations_new: remediationStats.new,
       remediations_updated: remediationStats.updated,
+      assets_count: assetStats.total,
+      assets_new: assetStats.new,
+      assets_updated: assetStats.updated,
       // Keep legacy columns for backward compatibility
       new_count: vulnerabilityStats.new,
       updated_count: vulnerabilityStats.updated,
@@ -959,6 +1252,7 @@ class VulnerabilityDatabase {
         details,
         vulnerabilities_count, vulnerabilities_new, vulnerabilities_updated, vulnerabilities_remediated,
         remediations_count, remediations_new, remediations_updated,
+        assets_count, assets_new, assets_updated,
         new_count, updated_count, remediated_count
       FROM sync_history
       ORDER BY sync_date DESC
@@ -994,6 +1288,7 @@ class VulnerabilityDatabase {
     const {
       vulnerabilityStats = {},
       remediationStats = {},
+      assetStats = {},
       details = null
     } = options;
 
@@ -1009,6 +1304,9 @@ class VulnerabilityDatabase {
       remediations_count: remediationStats.total ?? null,
       remediations_new: remediationStats.new ?? null,
       remediations_updated: remediationStats.updated ?? null,
+      assets_count: assetStats.total ?? null,
+      assets_new: assetStats.new ?? null,
+      assets_updated: assetStats.updated ?? null,
       new_count: vulnerabilityStats.new ?? null,
       updated_count: vulnerabilityStats.updated ?? null,
       remediated_count: vulnerabilityStats.remediated ?? null,

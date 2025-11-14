@@ -407,6 +407,13 @@ select[multiple] {
   border-bottom: 1px solid rgba(148, 163, 184, 0.08);
 }
 
+.table-subtext {
+  display: block;
+  font-size: 0.78rem;
+  color: rgba(148, 163, 184, 0.7);
+  margin-top: 0.1rem;
+}
+
 .data-table th.sortable {
   cursor: pointer;
   user-select: none;
@@ -614,6 +621,17 @@ select[multiple] {
   word-break: break-all;
 }
 
+.explorer-list li .item-meta {
+  font-size: 0.82rem;
+  color: rgba(148, 163, 184, 0.85);
+}
+
+.explorer-list li .item-id {
+  font-size: 0.75rem;
+  color: rgba(148, 163, 184, 0.6);
+  word-break: break-all;
+}
+
 .explorer-list li .item-description {
   font-size: 0.85rem;
   color: rgba(148, 163, 184, 0.8);
@@ -637,6 +655,73 @@ select[multiple] {
   max-height: 360px;
   overflow: auto;
   border-radius: 16px;
+}
+
+.asset-meta-card {
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 16px;
+  padding: 1rem 1.25rem;
+  margin-bottom: 1rem;
+  background: rgba(15, 23, 42, 0.6);
+}
+
+.asset-meta-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  align-items: flex-start;
+  margin-bottom: 0.75rem;
+}
+
+.asset-meta-name {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+  color: #f8fafc;
+}
+
+.asset-meta-id {
+  margin: 0.15rem 0 0;
+  font-size: 0.85rem;
+  color: rgba(148, 163, 184, 0.8);
+}
+
+.asset-meta-badges {
+  display: flex;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+}
+
+.asset-badge {
+  background: rgba(56, 189, 248, 0.12);
+  border: 1px solid rgba(56, 189, 248, 0.35);
+  border-radius: 999px;
+  padding: 0.25rem 0.75rem;
+  font-size: 0.75rem;
+  color: rgba(224, 242, 254, 0.9);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.asset-meta-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 0.6rem 1rem;
+}
+
+.asset-meta-grid span {
+  font-size: 0.75rem;
+  color: rgba(148, 163, 184, 0.75);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.asset-meta-grid strong {
+  display: block;
+  font-size: 0.9rem;
+  color: rgba(226, 232, 240, 0.95);
+  margin-top: 0.1rem;
+  word-break: break-word;
 }
 
 .table-footer {

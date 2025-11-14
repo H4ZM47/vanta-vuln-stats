@@ -125,6 +125,8 @@ ipcMain.handle('assets:vulnerabilities', (event, assetId, filters) =>
   dataService.getVulnerabilitiesByAsset(assetId, filters ?? {})
 );
 
+ipcMain.handle('assets:details', (event, assetId) => dataService.getAssetDetails(assetId));
+
 ipcMain.handle('cves:list', (event, filters) => dataService.getCVEs(filters ?? {}));
 
 ipcMain.handle('cves:assets', (event, cveName, filters) =>

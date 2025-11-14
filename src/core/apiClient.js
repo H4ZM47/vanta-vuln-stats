@@ -209,6 +209,24 @@ class VantaApiClient {
       signal,
     });
   }
+
+  /**
+   * Fetch assets from the Vanta API
+   * @param {Object} options - Query options
+   * @param {number} [options.pageSize=100] - Number of items per page (1-100)
+   * @param {Function} [options.onBatch] - Callback for each batch of results
+   * @param {Object} [options.filters={}] - Filter parameters supported by the API
+   * @param {AbortSignal} [options.signal] - Abort signal for cancellation
+   * @returns {Promise<Array>} Array of asset objects
+   */
+  async getAssets({ pageSize = MAX_PAGE_SIZE, onBatch, filters = {}, signal } = {}) {
+    return this.paginate({
+      endpoint: '/assets',
+      params: { pageSize, ...filters },
+      onBatch,
+      signal,
+    });
+  }
 }
 
 module.exports = { VantaApiClient };

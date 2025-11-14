@@ -11,6 +11,7 @@ The app replaces the legacy Python CLI/Qt tooling with a modern JavaScript stack
 - **Rich dashboard** – interactive metrics for totals, severity distribution, integration coverage, fixability, asset and CVE uniqueness, and CVSS averages.
 - **Vulnerability explorer** – filter by severity, status, fixability, integration, asset ID, CVE/name, and discovery/remediation date ranges. Paginated results keep navigation fast even for large datasets.
 - **Detail inspection** – view the full JSON payload for any vulnerability alongside its remediation history for audit or debugging purposes.
+- **Asset correlation** – automatically sync asset metadata from the Vanta Assets API so explorer views show friendly asset names, owners, environments, and last-seen timestamps alongside raw IDs.
 - **Sync history** – track how many records were inserted, updated, or newly remediated on each synchronization.
 
 ## Getting Started

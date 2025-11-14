@@ -161,6 +161,7 @@ class DataService {
           lastSyncDate: incremental ? this.database.getLastSuccessfulSyncDate() : null,
           remediationFilters,
           vulnerabilityFilters,
+          assetFilters: {},
         },
       }
     );
@@ -168,11 +169,14 @@ class DataService {
     try {
       const vulnerabilities = [];
       const remediations = [];
+      const assets = [];
 
       let vulnerabilitiesStats = { new: 0, updated: 0, remediated: 0, total: 0 };
       let remediationsStats = { new: 0, updated: 0, total: 0 };
+      let assetsStats = { new: 0, updated: 0, total: 0 };
       let processedVulnerabilities = 0;
       let processedRemediations = 0;
+      let processedAssets = 0;
 
       // Helper to check for pause/stop
       const checkPauseOrStop = async () => {
@@ -265,6 +269,41 @@ class DataService {
         }
       };
 
+      const flushAssetBuffer = () => {
+        if (!assets.length) {
+          return;
+        }
+        try {
+          const stats = this.database.storeAssetsBatch(assets);
+          assetsStats.new += stats.new;
+          assetsStats.updated += stats.updated;
+          assetsStats.total += stats.total;
+
+          onIncrementalUpdate?.({
+            type: 'assets',
+            stats: { ...assetsStats },
+            flushed: stats.total,
+          });
+
+          this.database.logSyncEvent(
+            'flush',
+            `Flushed ${stats.total} assets to database`,
+            {
+              assetStats: stats,
+              details: {
+                type: 'assets',
+                batchSize: stats.total,
+                cumulativeStats: { ...assetsStats }
+              }
+            }
+          );
+
+          assets.length = 0;
+        } catch (error) {
+          throw new Error(`Failed to flush asset buffer: ${error.message}`);
+        }
+      };
+
       // Fetch vulnerabilities and remediations in parallel for faster sync
       await Promise.all([
         apiClient.getVulnerabilities({
@@ -323,6 +362,32 @@ class DataService {
           },
           signal: this.syncState.abortController.signal,
         }),
+        apiClient.getAssets({
+          filters: {},
+          onBatch: async (batch) => {
+            await checkPauseOrStop();
+            assets.push(...batch);
+            processedAssets += batch.length;
+            progressCallback?.({ type: 'assets', count: processedAssets });
+
+            this.database.logSyncEvent(
+              'batch',
+              `Fetched ${batch.length} assets from API (total: ${processedAssets})`,
+              {
+                details: {
+                  type: 'assets',
+                  batchSize: batch.length,
+                  totalProcessed: processedAssets
+                }
+              }
+            );
+
+            if (assets.length >= this.batchSize) {
+              flushAssetBuffer();
+            }
+          },
+          signal: this.syncState.abortController.signal,
+        }),
       ]);
 
       // Store any remaining records
@@ -334,8 +399,12 @@ class DataService {
         flushRemediationBuffer();
       }
 
+      if (assets.length > 0) {
+        flushAssetBuffer();
+      }
+
       // Record combined sync history
-      this.database.recordSyncHistory(vulnerabilitiesStats, remediationsStats);
+      this.database.recordSyncHistory(vulnerabilitiesStats, remediationsStats, assetsStats);
 
       // Log sync completion event
       this.database.logSyncEvent(
@@ -344,9 +413,11 @@ class DataService {
         {
           vulnerabilityStats: vulnerabilitiesStats,
           remediationStats: remediationsStats,
+          assetStats: assetsStats,
           details: {
             totalVulnerabilities: processedVulnerabilities,
-            totalRemediations: processedRemediations
+            totalRemediations: processedRemediations,
+            totalAssets: processedAssets
           }
         }
       );
@@ -354,6 +425,7 @@ class DataService {
       return {
         vulnerabilities: vulnerabilitiesStats,
         remediations: remediationsStats,
+        assets: assetsStats,
       };
     } catch (error) {
       // Log error event
@@ -477,6 +549,10 @@ class DataService {
 
   getVulnerabilitiesByAsset(assetId, filters = {}) {
     return this.database.getVulnerabilitiesByAsset(assetId, filters);
+  }
+
+  getAssetDetails(assetId) {
+    return this.database.getAssetDetails(assetId);
   }
 
   getCVEs(filters = {}) {

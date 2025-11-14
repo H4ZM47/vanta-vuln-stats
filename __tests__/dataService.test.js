@@ -43,6 +43,7 @@ describe('DataService - Sync Operations', () => {
     mockApiClientInstance = {
       getVulnerabilities: jest.fn(),
       getRemediations: jest.fn(),
+      getAssets: jest.fn().mockResolvedValue(undefined),
     };
 
     mockDatabaseInstance = {
@@ -56,6 +57,11 @@ describe('DataService - Sync Operations', () => {
         new: 8,
         updated: 3,
         total: 11,
+      })),
+      storeAssetsBatch: jest.fn(() => ({
+        new: 6,
+        updated: 4,
+        total: 10,
       })),
       recordSyncHistory: jest.fn(),
       logSyncEvent: jest.fn(),
@@ -102,7 +108,12 @@ describe('DataService - Sync Operations', () => {
           new: expect.any(Number),
           updated: expect.any(Number),
           total: expect.any(Number),
-        })
+        }),
+        expect.objectContaining({
+          new: expect.any(Number),
+          updated: expect.any(Number),
+          total: expect.any(Number),
+        }),
       );
 
       // Verify result structure
@@ -118,14 +129,21 @@ describe('DataService - Sync Operations', () => {
           updated: expect.any(Number),
           total: expect.any(Number),
         }),
+        assets: expect.objectContaining({
+          new: expect.any(Number),
+          updated: expect.any(Number),
+          total: expect.any(Number),
+        }),
       });
     });
 
-    it('should fetch vulnerabilities and remediations in parallel', async () => {
+    it('should fetch vulnerabilities, remediations, and assets in parallel', async () => {
       let vulnStarted = false;
       let remediationsStarted = false;
+      let assetsStarted = false;
       let vulnResolve;
       let remediationsResolve;
+      let assetsResolve;
 
       const vulnerabilitiesPromise = new Promise((resolve) => {
         vulnResolve = resolve;
@@ -137,25 +155,34 @@ describe('DataService - Sync Operations', () => {
         remediationsStarted = true;
       });
 
+      const assetsPromise = new Promise((resolve) => {
+        assetsResolve = resolve;
+        assetsStarted = true;
+      });
+
       mockApiClientInstance.getVulnerabilities.mockImplementation(() => vulnerabilitiesPromise);
       mockApiClientInstance.getRemediations.mockImplementation(() => remediationsPromise);
+      mockApiClientInstance.getAssets.mockImplementation(() => assetsPromise);
 
       const syncPromise = dataService.syncData();
 
       // Wait for both to start
       await new Promise(resolve => setTimeout(resolve, 10));
 
-      // Both should have started (proving parallel execution)
+      // All should have started (proving parallel execution)
       expect(vulnStarted).toBe(true);
       expect(remediationsStarted).toBe(true);
+      expect(assetsStarted).toBe(true);
 
-      // Resolve both and await completion
+      // Resolve all and await completion
       vulnResolve();
       remediationsResolve();
+      assetsResolve();
       await syncPromise;
 
       expect(mockApiClientInstance.getVulnerabilities).toHaveBeenCalled();
       expect(mockApiClientInstance.getRemediations).toHaveBeenCalled();
+      expect(mockApiClientInstance.getAssets).toHaveBeenCalled();
     });
 
     it('should throw error if credentials are missing', async () => {
@@ -193,6 +220,23 @@ describe('DataService - Sync Operations', () => {
       // Clean up
       dataService.stopSync();
       await expect(firstSync).rejects.toThrow();
+    });
+
+    it('should persist assets when batches are returned from API', async () => {
+      mockApiClientInstance.getVulnerabilities.mockImplementation(async ({ onBatch }) => {
+        await onBatch([{ id: 'v1' }]);
+      });
+
+      mockApiClientInstance.getRemediations.mockImplementation(async () => {});
+
+      mockApiClientInstance.getAssets.mockImplementation(async ({ onBatch }) => {
+        await onBatch([{ id: 'asset-1', displayName: 'Asset 1' }]);
+        await onBatch([{ id: 'asset-2', displayName: 'Asset 2' }]);
+      });
+
+      await dataService.syncData();
+
+      expect(mockDatabaseInstance.storeAssetsBatch).toHaveBeenCalled();
     });
   });
 
@@ -459,6 +503,11 @@ describe('DataService - Sync Operations', () => {
           new: expect.any(Number),
           updated: expect.any(Number),
           total: expect.any(Number),
+        }),
+        expect.objectContaining({
+          new: expect.any(Number),
+          updated: expect.any(Number),
+          total: expect.any(Number),
         })
       );
     });
@@ -472,6 +521,11 @@ describe('DataService - Sync Operations', () => {
       });
 
       mockApiClientInstance.getRemediations.mockImplementation(async ({ signal }) => {
+        expect(signal).toBeDefined();
+        expect(signal).toBeInstanceOf(AbortSignal);
+      });
+
+      mockApiClientInstance.getAssets.mockImplementation(async ({ signal }) => {
         expect(signal).toBeDefined();
         expect(signal).toBeInstanceOf(AbortSignal);
       });
