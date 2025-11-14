@@ -168,11 +168,14 @@ class DataService {
     try {
       const vulnerabilities = [];
       const remediations = [];
+      const assets = [];
 
       let vulnerabilitiesStats = { new: 0, updated: 0, remediated: 0, total: 0 };
       let remediationsStats = { new: 0, updated: 0, total: 0 };
+      let assetsStats = { new: 0, updated: 0, total: 0 };
       let processedVulnerabilities = 0;
       let processedRemediations = 0;
+      let processedAssets = 0;
 
       // Helper to check for pause/stop
       const checkPauseOrStop = async () => {
@@ -265,7 +268,42 @@ class DataService {
         }
       };
 
-      // Fetch vulnerabilities and remediations in parallel for faster sync
+      const flushAssetBuffer = () => {
+        if (!assets.length) {
+          return;
+        }
+        try {
+          const stats = this.database.storeAssetsBatch(assets);
+          assetsStats.new += stats.new;
+          assetsStats.updated += stats.updated;
+          assetsStats.total += stats.total;
+
+          onIncrementalUpdate?.({
+            type: 'assets',
+            stats: { ...assetsStats },
+            flushed: stats.total,
+          });
+
+          // Log database flush event
+          this.database.logSyncEvent(
+            'flush',
+            `Flushed ${stats.total} vulnerable assets to database`,
+            {
+              details: {
+                type: 'assets',
+                batchSize: stats.total,
+                cumulativeStats: { ...assetsStats }
+              }
+            }
+          );
+
+          assets.length = 0;
+        } catch (error) {
+          throw new Error(`Failed to flush asset buffer: ${error.message}`);
+        }
+      };
+
+      // Fetch vulnerabilities, remediations, and assets in parallel for faster sync
       await Promise.all([
         apiClient.getVulnerabilities({
           filters: vulnerabilityFilters,
@@ -323,6 +361,33 @@ class DataService {
           },
           signal: this.syncState.abortController.signal,
         }),
+        apiClient.getVulnerableAssets({
+          onBatch: async (batch) => {
+            await checkPauseOrStop();
+            assets.push(...batch);
+            processedAssets += batch.length;
+            progressCallback?.({ type: 'assets', count: processedAssets });
+
+            // Log API batch fetch
+            this.database.logSyncEvent(
+              'batch',
+              `Fetched ${batch.length} vulnerable assets from API (total: ${processedAssets})`,
+              {
+                details: {
+                  type: 'assets',
+                  batchSize: batch.length,
+                  totalProcessed: processedAssets
+                }
+              }
+            );
+
+            // Flush to database when buffer reaches batch size
+            if (assets.length >= this.batchSize) {
+              flushAssetBuffer();
+            }
+          },
+          signal: this.syncState.abortController.signal,
+        }),
       ]);
 
       // Store any remaining records
@@ -332,6 +397,10 @@ class DataService {
 
       if (remediations.length > 0) {
         flushRemediationBuffer();
+      }
+
+      if (assets.length > 0) {
+        flushAssetBuffer();
       }
 
       // Record combined sync history
@@ -346,7 +415,9 @@ class DataService {
           remediationStats: remediationsStats,
           details: {
             totalVulnerabilities: processedVulnerabilities,
-            totalRemediations: processedRemediations
+            totalRemediations: processedRemediations,
+            totalAssets: processedAssets,
+            assetsStats: assetsStats
           }
         }
       );
@@ -354,6 +425,7 @@ class DataService {
       return {
         vulnerabilities: vulnerabilitiesStats,
         remediations: remediationsStats,
+        assets: assetsStats,
       };
     } catch (error) {
       // Log error event

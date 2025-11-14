@@ -497,7 +497,9 @@ const renderDetails = (vulnerability, remediations) => {
 const renderAssets = () => {
   const searchTerm = state.assetSearchTerm.toLowerCase();
   const filteredAssets = state.assets.filter((asset) =>
-    asset.assetId?.toLowerCase().includes(searchTerm)
+    asset.assetId?.toLowerCase().includes(searchTerm) ||
+    asset.assetName?.toLowerCase().includes(searchTerm) ||
+    asset.assetType?.toLowerCase().includes(searchTerm)
   );
 
   if (!filteredAssets.length) {
@@ -517,9 +519,11 @@ const renderAssets = () => {
   elements.assetList.innerHTML = paginatedAssets
     .map((asset) => {
       const isSelected = state.selectedAsset === asset.assetId ? 'selected' : '';
+      const assetName = asset.assetName !== asset.assetId ? escapeHtml(asset.assetName) : escapeHtml(asset.assetId);
+      const assetTypeLabel = asset.assetType ? ` <span style="font-size: 0.75rem; color: rgba(148, 163, 184, 0.7);">(${escapeHtml(asset.assetType)})</span>` : '';
       return `
         <li class="${isSelected}" data-asset-id="${escapeHtml(asset.assetId)}">
-          <div class="item-name">${escapeHtml(asset.assetId) || 'Unknown Asset'}</div>
+          <div class="item-name">${assetName || 'Unknown Asset'}${assetTypeLabel}</div>
           <div class="item-count">${formatNumber(asset.vulnerabilityCount)} vulnerabilities (${formatNumber(asset.activeCount)} active, ${formatNumber(asset.remediatedCount)} remediated)</div>
         </li>
       `;
@@ -543,7 +547,10 @@ const renderAssetVulnerabilities = (vulnerabilities) => {
     return;
   }
 
-  elements.assetVulnTitle.textContent = `Vulnerabilities for ${state.selectedAsset}`;
+  // Find the asset name from the asset list
+  const selectedAssetData = state.assets.find(a => a.assetId === state.selectedAsset);
+  const displayName = selectedAssetData?.assetName || state.selectedAsset;
+  elements.assetVulnTitle.textContent = `Vulnerabilities for ${displayName}`;
 
   if (!vulnerabilities || !vulnerabilities.length) {
     elements.assetVulnTable.innerHTML = '<tr><td colspan="4" style="text-align: center; padding: 2rem; color: rgba(148, 163, 184, 0.6);">No vulnerabilities found</td></tr>';
@@ -1161,7 +1168,9 @@ const attachEventListeners = () => {
   elements.nextAssetPage.addEventListener('click', () => {
     const searchTerm = state.assetSearchTerm.toLowerCase();
     const filteredAssets = state.assets.filter((asset) =>
-      asset.assetId?.toLowerCase().includes(searchTerm)
+      asset.assetId?.toLowerCase().includes(searchTerm) ||
+      asset.assetName?.toLowerCase().includes(searchTerm) ||
+      asset.assetType?.toLowerCase().includes(searchTerm)
     );
     const maxPage = Math.ceil(filteredAssets.length / state.assetPageSize);
     if (state.assetPage < maxPage) {
