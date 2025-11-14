@@ -603,16 +603,16 @@ const renderAssetMetadata = (assetId, assetDetails) => {
   const summary = state.assets.find((asset) => asset.assetId === assetId) || {};
   const metadata = assetDetails ?? state.assetDetails.get(assetId) ?? null;
   const displayName = metadata?.name || summary.assetName || assetId || 'Unknown Asset';
-  const externalIdentifier = metadata?.external_identifier || summary.externalIdentifier || '';
-  const integrationId = metadata?.integration_id || summary.assetIntegrationId || '';
-  const integrationType = metadata?.integration_type || summary.assetIntegrationType || '';
+  const externalIdentifier = metadata?.external_identifier || summary.externalIdentifier || null;
+  const integrationId = metadata?.integration_id || summary.assetIntegrationId || null;
+  const integrationType = metadata?.integration_type || summary.assetIntegrationType || null;
   const owner =
     metadata?.primary_owner ||
     (Array.isArray(metadata?.owners) ? metadata.owners[0] : null) ||
     summary.primaryOwner ||
-    '—';
-  const risk = metadata?.risk_level;
-  const subtype = metadata?.asset_subtype || summary.assetSubtype;
+    null;
+  const risk = metadata?.risk_level || null;
+  const subtype = metadata?.asset_subtype || summary.assetSubtype || null;
 
   const badgeValues = [risk, subtype].filter(Boolean);
   elements.assetMetaBadges.innerHTML = badgeValues

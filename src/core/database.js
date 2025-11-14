@@ -415,10 +415,116 @@ class VulnerabilityDatabase {
       .filter(Boolean);
   }
 
+  /**
+   * Normalize asset data from the /vulnerable-assets endpoint into database schema.
+   *
+   * This method extracts and normalizes asset information from the Vanta API response
+   * format into the local database schema. It handles multiple field name variations
+   * and supports the /vulnerable-assets endpoint structure with scanner metadata.
+   *
+   * IMPORTANT: This method processes data from the /vulnerable-assets endpoint, which
+   * replaced the deprecated /assets endpoint. The new endpoint includes richer metadata
+   * via the scanners[] array containing scanner-specific details like IPs, hostnames,
+   * operating systems, and asset tags.
+   *
+   * Key normalization behaviors:
+   * - Extracts asset name from multiple possible field names (displayName, name, assetName, etc.)
+   * - Normalizes owner information from arrays or single values into consistent format
+   * - Flattens nested integration and scanner objects into top-level fields
+   * - Extracts environment from scanner asset tags when not available at top level
+   * - Extracts platform/OS from scanner metadata when not available at top level
+   * - Converts complex tag structures into JSON arrays
+   * - Preserves full raw API response for audit and debugging
+   *
+   * Scanner metadata extraction (from scanners[0]):
+   * - integration_id: Extracted from integrationId field
+   * - environment: Extracted from assetTags with key='environment'
+   * - platform: Extracted from operatingSystems[0]
+   * - external_identifier: Extracted from targetId
+   *
+   * Field extraction priority (uses first non-null value):
+   * - name: displayName > name > assetName > resourceName > title
+   * - owners: owners > owner > assignedUsers > ownerList
+   * - tags: tags > labels > tagList
+   * - type: assetType > resourceType
+   * - platform: platform > platformName > operatingSystem > os > scanners[0].operatingSystems[0]
+   * - environment: environment > environmentName > environmentType > scanners[0].assetTags['environment']
+   * - integration_id: integrationId > integration.id > scanners[0].integrationId
+   * - external_identifier: externalIdentifier > resourceIdentifier > uniqueIdentifier > slug > scanners[0].targetId
+   *
+   * @private
+   * @param {Object} asset - Raw asset object from /vulnerable-assets API endpoint
+   * @param {string} asset.id - Required unique asset identifier
+   * @param {string} [asset.name] - Asset display name (may use various field names)
+   * @param {string} [asset.assetType] - Asset type (SERVER, WORKSTATION, CODE_REPOSITORY, etc.)
+   * @param {Array|Object} [asset.owners] - Asset owners (supports multiple formats)
+   * @param {Array|Object} [asset.tags] - Asset tags or labels
+   * @param {Array} [asset.scanners] - Array of scanner metadata objects (new in /vulnerable-assets)
+   * @param {string} [asset.scanners[].integrationId] - Scanner integration identifier
+   * @param {Array} [asset.scanners[].operatingSystems] - Operating system names
+   * @param {Array} [asset.scanners[].assetTags] - Scanner-reported asset tags
+   * @param {string} [asset.scanners[].targetId] - Scanner-specific target identifier
+   * @param {Object} [asset.integration] - Integration metadata object
+   * @param {string} [asset.environment] - Environment name (production, staging, etc.)
+   * @param {string} [asset.platform] - Platform or OS information
+   * @returns {Object|null} Normalized asset object ready for database insertion, or null if asset.id is missing
+   * @returns {string} return.id - Asset unique identifier
+   * @returns {string|null} return.name - Normalized display name
+   * @returns {string|null} return.asset_type - Asset type
+   * @returns {string|null} return.integration_id - Scanner integration ID (from top level or scanners[0])
+   * @returns {string|null} return.environment - Environment name (from top level or scanner tags)
+   * @returns {string|null} return.platform - Platform/OS (from top level or scanner metadata)
+   * @returns {string|null} return.primary_owner - First owner from owners list
+   * @returns {string|null} return.owners - JSON stringified array of all owners
+   * @returns {string|null} return.tags - JSON stringified array of tags
+   * @returns {string|null} return.external_identifier - External identifier (from top level or scanner targetId)
+   * @returns {string} return.raw_data - Full JSON of original API response
+   * @returns {string} return.updated_at - ISO 8601 timestamp of normalization
+   *
+   * @example
+   * // API response from /vulnerable-assets with scanner metadata
+   * const apiAsset = {
+   *   id: 'asset-123',
+   *   name: 'production-server-01',
+   *   assetType: 'SERVER',
+   *   owners: ['alice@example.com'],
+   *   scanners: [{
+   *     integrationId: 'qualys',
+   *     operatingSystems: ['Ubuntu 20.04 LTS'],
+   *     assetTags: [
+   *       { key: 'environment', value: 'production' },
+   *       { key: 'team', value: 'platform' }
+   *     ],
+   *     targetId: 'scanner-target-123',
+   *     ipv4s: ['192.168.1.100'],
+   *     hostnames: ['web-server']
+   *   }]
+   * };
+   *
+   * // Normalized for database
+   * const normalized = this._normaliseAsset(apiAsset);
+   * // {
+   * //   id: 'asset-123',
+   * //   name: 'production-server-01',
+   * //   asset_type: 'SERVER',
+   * //   integration_id: 'qualys',
+   * //   environment: 'production',
+   * //   platform: 'Ubuntu 20.04 LTS',
+   * //   external_identifier: 'scanner-target-123',
+   * //   primary_owner: 'alice@example.com',
+   * //   owners: '["alice@example.com"]',
+   * //   updated_at: '2025-11-14T12:00:00.000Z',
+   * //   raw_data: '{"id":"asset-123",...}'
+   * // }
+   */
   _normaliseAsset(asset) {
     if (!asset?.id) {
       return null;
     }
+
+    // Extract scanner metadata from scanners array (for /vulnerable-assets endpoint)
+    // The /vulnerable-assets endpoint includes detailed scanner metadata not present in deprecated /assets
+    const scanner = asset.scanners?.[0];
 
     const owners = this._normalizeOwnerList(asset.owners ?? asset.owner ?? asset.assignedUsers ?? asset.ownerList);
     const tags = this._normalizeTags(asset.tags ?? asset.labels ?? asset.tagList);
@@ -432,16 +538,43 @@ class VulnerabilityDatabase {
     const description = asset.description ?? asset.summary ?? asset.notes ?? null;
     const assetType = asset.assetType ?? asset.resourceType ?? null;
     const assetSubtype = asset.assetSubtype ?? asset.resourceSubtype ?? null;
-    const integrationId = asset.integrationId ?? asset.integration?.id ?? null;
+
+    // Extract integration_id from scanners array if not directly available
+    const integrationId =
+      asset.integrationId ??
+      asset.integration?.id ??
+      scanner?.integrationId ??
+      null;
     const integrationType = asset.integrationType ?? asset.integration?.type ?? null;
-    const environment = asset.environment ?? asset.environmentName ?? asset.environmentType ?? null;
-    const platform = asset.platform ?? asset.platformName ?? asset.operatingSystem ?? asset.os ?? null;
+
+    // Extract environment from scanners[0].assetTags (key='environment')
+    const environmentFromTags = scanner?.assetTags?.find(t => t.key === 'environment')?.value;
+    const environment =
+      asset.environment ??
+      asset.environmentName ??
+      asset.environmentType ??
+      environmentFromTags ??
+      null;
+
+    // Extract platform from scanners[0].operatingSystems[0]
+    const platformFromScanner = scanner?.operatingSystems?.[0];
+    const platform =
+      asset.platform ??
+      asset.platformName ??
+      asset.operatingSystem ??
+      asset.os ??
+      platformFromScanner ??
+      null;
+
+    // Extract external_identifier from scanner.targetId if not available
     const externalIdentifier =
       asset.externalIdentifier ??
       asset.resourceIdentifier ??
       asset.uniqueIdentifier ??
       asset.slug ??
+      scanner?.targetId ??
       null;
+
     const riskLevel = asset.riskLevel ?? asset.risk ?? null;
     const firstSeen = asset.firstSeen ?? asset.firstSeenAt ?? asset.firstSeenOn ?? null;
     const lastSeen = asset.lastSeen ?? asset.lastSeenAt ?? asset.lastSeenDate ?? asset.lastSeenOn ?? null;
@@ -1191,10 +1324,17 @@ class VulnerabilityDatabase {
       GROUP BY remediation_status
     `).all(remediationParams);
 
-    const statusCounts = byStatus.reduce((acc, row) => {
-      acc[row.remediation_status] = row.count;
-      return acc;
-    }, {});
+    const statusCounts = byStatus.reduce(
+      (acc, row) => {
+        acc[row.remediation_status] = row.count;
+        return acc;
+      },
+      {
+        remediated: 0,
+        overdue: 0,
+        open: 0,
+      },
+    );
 
     // On-time vs late remediations
     const timeliness = this.db.prepare(`
@@ -1210,21 +1350,43 @@ class VulnerabilityDatabase {
       GROUP BY timeliness
     `).all(remediationParams);
 
-    const timelinessCounts = timeliness.reduce((acc, row) => {
-      acc[row.timeliness] = row.count;
-      return acc;
-    }, {});
+    const timelinessCounts = timeliness.reduce(
+      (acc, row) => {
+        acc[row.timeliness] = row.count;
+        return acc;
+      },
+      {
+        on_time: 0,
+        late: 0,
+        pending: 0,
+      },
+    );
+
+    const statusSection = {
+      remediated: statusCounts.remediated ?? 0,
+      overdue: statusCounts.overdue ?? 0,
+      open: statusCounts.open ?? 0,
+    };
+
+    const timelinessSection = {
+      onTime: timelinessCounts.on_time ?? 0,
+      late: timelinessCounts.late ?? 0,
+      pending: timelinessCounts.pending ?? 0,
+    };
 
     return {
       total: totalRemediations,
       withMatchingVulnerability: remediationsWithVulns,
-      withoutMatchingVulnerability: totalRemediations - remediationsWithVulns,
-      remediated: statusCounts.remediated ?? 0,
-      overdue: statusCounts.overdue ?? 0,
-      open: statusCounts.open ?? 0,
-      onTime: timelinessCounts.on_time ?? 0,
-      late: timelinessCounts.late ?? 0,
-      pending: timelinessCounts.pending ?? 0,
+      withoutMatchingVulnerability: Math.max(totalRemediations - remediationsWithVulns, 0),
+      byStatus: statusSection,
+      byTimeliness: timelinessSection,
+      // Keep flattened fields for backward compatibility
+      remediated: statusSection.remediated,
+      overdue: statusSection.overdue,
+      open: statusSection.open,
+      onTime: timelinessSection.onTime,
+      late: timelinessSection.late,
+      pending: timelinessSection.pending,
     };
   }
 
