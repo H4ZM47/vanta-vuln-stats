@@ -141,6 +141,15 @@ class FakeVulnerabilityDatabase {
     return [...this.syncHistory];
   }
 
+  getLastSuccessfulSyncDate() {
+    // Find the last sync event with event_type = 'complete'
+    const completedSyncs = this.syncHistory.filter((entry) => entry.event_type === 'complete');
+    if (completedSyncs.length === 0) {
+      return null;
+    }
+    return completedSyncs[completedSyncs.length - 1].sync_date;
+  }
+
   logSyncEvent(eventType, message, options = {}) {
     // Log verbose sync events for testing
     this.syncHistory.push({
@@ -191,14 +200,14 @@ class FakeApiClient {
     this.remediationBatches = remediationBatches;
   }
 
-  async getVulnerabilities({ onBatch }) {
+  async getVulnerabilities({ onBatch, filters = {} }) {
     for (const batch of this.vulnerabilityBatches) {
       await onBatch(batch);
     }
     return this.vulnerabilityBatches.flat();
   }
 
-  async getRemediations({ onBatch }) {
+  async getRemediations({ onBatch, filters = {} }) {
     for (const batch of this.remediationBatches) {
       await onBatch(batch);
     }
@@ -206,8 +215,24 @@ class FakeApiClient {
   }
 }
 
+/**
+ * Helper function to create a mock database instance
+ */
+function createMockDatabase() {
+  return new FakeVulnerabilityDatabase();
+}
+
+/**
+ * Helper function to create a mock API client instance
+ */
+function createMockApiClient(config) {
+  return new FakeApiClient(config);
+}
+
 module.exports = {
   FakeVulnerabilityDatabase,
   MemoryStore,
   FakeApiClient,
+  createMockDatabase,
+  createMockApiClient,
 };

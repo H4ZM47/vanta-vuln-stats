@@ -259,7 +259,7 @@ class VulnerabilityDatabase {
       scanner_score: vuln.scannerScore ?? null,
       is_fixable: vuln.isFixable ? 1 : 0,
       remediate_by: vuln.remediateByDate || null,
-      external_url: vuln.externalUrl || null,
+      external_url: vuln.externalURL || null,
       scan_source: vuln.scanSource || null,
       deactivated_on: deactivateMetadata.deactivatedOnDate || null,
       related_vulns: Array.isArray(vuln.relatedVulns) ? JSON.stringify(vuln.relatedVulns) : null,
@@ -734,6 +734,22 @@ class VulnerabilityDatabase {
       LIMIT ?
     `);
     return stmt.all(finalLimit);
+  }
+
+  /**
+   * Get the timestamp of the last successful sync
+   * @returns {string|null} ISO 8601 timestamp of last successful sync, or null if no syncs found
+   */
+  getLastSuccessfulSyncDate() {
+    const stmt = this.db.prepare(`
+      SELECT sync_date
+      FROM sync_history
+      WHERE event_type = 'complete'
+      ORDER BY sync_date DESC
+      LIMIT 1
+    `);
+    const result = stmt.get();
+    return result?.sync_date || null;
   }
 
   /**

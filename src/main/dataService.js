@@ -97,13 +97,15 @@ class DataService {
    * @param {Function} [progressCallback] - Called with progress updates: {type: string, count: number}
    * @param {Function} [onIncrementalUpdate] - Called when batches are flushed: {type: string, stats: Object, flushed: number}
    * @param {Function} [stateCallback] - Called with state changes: 'running' | 'paused' | 'idle'
+   * @param {Object} [options={}] - Sync options
+   * @param {boolean} [options.incremental=false] - Enable incremental sync (only fetch data changed since last sync)
    * @returns {Promise<{vulnerabilities: Object, remediations: Object}>} Statistics about synced data
    * @throws {Error} If a sync is already in progress
    * @throws {Error} If credentials are not configured
    * @throws {Error} If sync is stopped by user
    * @throws {Error} If database flush operations fail
    */
-  async syncData(progressCallback, onIncrementalUpdate, stateCallback) {
+  async syncData(progressCallback, onIncrementalUpdate, stateCallback, options = {}) {
     if (this.activeSync) {
       throw new Error('A sync is already in progress.');
     }
@@ -128,8 +130,40 @@ class DataService {
     this.syncState.isPaused = false;
     stateCallback?.('running');
 
+    // Determine sync mode and filters
+    const { incremental = false } = options;
+    let remediationFilters = {};
+    let vulnerabilityFilters = {};
+    let syncMode = 'full';
+
+    if (incremental) {
+      const lastSyncDate = this.database.getLastSuccessfulSyncDate();
+      if (lastSyncDate) {
+        syncMode = 'incremental';
+        // Filter remediations that occurred after the last sync
+        remediationFilters.remediatedAfterDate = lastSyncDate;
+        // Note: Vulnerabilities don't have a "changed after" filter in the API,
+        // so we fetch all vulnerabilities but could optimize this in the future
+      } else {
+        // No previous sync found, fall back to full sync
+        syncMode = 'full (no previous sync)';
+      }
+    }
+
     // Log sync start event
-    this.database.logSyncEvent('start', 'Sync operation started');
+    this.database.logSyncEvent(
+      'start',
+      `Sync operation started (mode: ${syncMode})`,
+      {
+        details: {
+          mode: syncMode,
+          incremental,
+          lastSyncDate: incremental ? this.database.getLastSuccessfulSyncDate() : null,
+          remediationFilters,
+          vulnerabilityFilters,
+        },
+      }
+    );
 
     try {
       const vulnerabilities = [];
@@ -234,6 +268,7 @@ class DataService {
       // Fetch vulnerabilities and remediations in parallel for faster sync
       await Promise.all([
         apiClient.getVulnerabilities({
+          filters: vulnerabilityFilters,
           onBatch: async (batch) => {
             await checkPauseOrStop();
             vulnerabilities.push(...batch);
@@ -261,6 +296,7 @@ class DataService {
           signal: this.syncState.abortController.signal,
         }),
         apiClient.getRemediations({
+          filters: remediationFilters,
           onBatch: async (batch) => {
             await checkPauseOrStop();
             remediations.push(...batch);
