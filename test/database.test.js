@@ -194,3 +194,100 @@ test('batch operations handle records without IDs', () => {
     cleanupDb(db);
   }
 });
+
+test('getStatistics correctly correlates vulnerabilities with remediations', () => {
+  const db = createTempDb();
+
+  try {
+    // Create vulnerabilities
+    const vulnerabilities = [
+      { id: 'v-1', name: 'CVE-2024-001', severity: 'HIGH' },
+      { id: 'v-2', name: 'CVE-2024-002', severity: 'MEDIUM' },
+      { id: 'v-3', name: 'CVE-2024-003', severity: 'LOW' },
+      { id: 'v-4', name: 'CVE-2024-004', severity: 'CRITICAL' },
+    ];
+    db.storeVulnerabilitiesBatch(vulnerabilities);
+
+    // Create remediations
+    const remediations = [
+      // v-1: 2 remediations, 1 remediated, 1 open
+      { id: 'r-1', vulnerabilityId: 'v-1', status: 'closed', remediationDate: '2024-01-15', isRemediatedOnTime: true },
+      { id: 'r-2', vulnerabilityId: 'v-1', status: 'open' },
+
+      // v-2: 1 remediation, late
+      { id: 'r-3', vulnerabilityId: 'v-2', status: 'closed', remediationDate: '2024-01-20', isRemediatedOnTime: false },
+
+      // v-3: no remediations (active)
+
+      // v-4: 1 remediation, overdue
+      { id: 'r-4', vulnerabilityId: 'v-4', status: 'overdue' },
+
+      // Orphaned remediation (no matching vulnerability)
+      { id: 'r-5', vulnerabilityId: 'v-999', status: 'closed', remediationDate: '2024-01-25', isRemediatedOnTime: true },
+    ];
+    db.storeRemediationsBatch(remediations);
+
+    // Get statistics
+    const stats = db.getStatistics();
+
+    // Verify vulnerability counts
+    assert.equal(stats.totalCount, 4, 'Should have 4 total vulnerabilities');
+    assert.equal(stats.active, 2, 'v-3 and v-4 should be active (no remediation_date)');
+    assert.equal(stats.remediated, 2, 'v-1 and v-2 should be remediated (have remediation_date)');
+
+    // Verify remediation statistics
+    assert.ok(stats.remediations, 'Should have remediation statistics');
+    assert.equal(stats.remediations.total, 5, 'Should have 5 total remediation records');
+    assert.equal(stats.remediations.withMatchingVulnerability, 4, 'Should have 4 remediations with matching vulnerabilities');
+    assert.equal(stats.remediations.withoutMatchingVulnerability, 1, 'Should have 1 orphaned remediation (r-5)');
+
+    // Verify remediation status
+    assert.equal(stats.remediations.byStatus.remediated, 3, 'Should have 3 remediated (r-1, r-3, r-5)');
+    assert.equal(stats.remediations.byStatus.open, 1, 'Should have 1 open (r-2)');
+    assert.equal(stats.remediations.byStatus.overdue, 1, 'Should have 1 overdue (r-4)');
+
+    // Verify timeliness
+    assert.equal(stats.remediations.byTimeliness.onTime, 2, 'Should have 2 on-time remediations (r-1, r-5)');
+    assert.equal(stats.remediations.byTimeliness.late, 1, 'Should have 1 late remediation (r-3)');
+    assert.equal(stats.remediations.byTimeliness.pending, 2, 'Should have 2 pending remediations (r-2, r-4)');
+
+  } finally {
+    cleanupDb(db);
+  }
+});
+
+test('getStatistics with filters correctly correlates remediations', () => {
+  const db = createTempDb();
+
+  try {
+    // Create vulnerabilities
+    const vulnerabilities = [
+      { id: 'v-1', name: 'CVE-2024-001', severity: 'HIGH' },
+      { id: 'v-2', name: 'CVE-2024-002', severity: 'MEDIUM' },
+      { id: 'v-3', name: 'CVE-2024-003', severity: 'HIGH' },
+    ];
+    db.storeVulnerabilitiesBatch(vulnerabilities);
+
+    // Create remediations
+    const remediations = [
+      { id: 'r-1', vulnerabilityId: 'v-1', status: 'closed', remediationDate: '2024-01-15', isRemediatedOnTime: true },
+      { id: 'r-2', vulnerabilityId: 'v-2', status: 'closed', remediationDate: '2024-01-20', isRemediatedOnTime: false },
+      { id: 'r-3', vulnerabilityId: 'v-3', status: 'open' },
+    ];
+    db.storeRemediationsBatch(remediations);
+
+    // Get statistics filtered by HIGH severity
+    const stats = db.getStatistics({ severity: ['HIGH'] });
+
+    // Should only count vulnerabilities with HIGH severity
+    assert.equal(stats.totalCount, 2, 'Should have 2 HIGH severity vulnerabilities');
+
+    // Should only count remediations for HIGH severity vulnerabilities
+    assert.equal(stats.remediations.total, 2, 'Should have 2 remediations for HIGH severity vulnerabilities (r-1, r-3)');
+    assert.equal(stats.remediations.byStatus.remediated, 1, 'Should have 1 remediated HIGH severity (r-1)');
+    assert.equal(stats.remediations.byStatus.open, 1, 'Should have 1 open HIGH severity (r-3)');
+
+  } finally {
+    cleanupDb(db);
+  }
+});

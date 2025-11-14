@@ -647,15 +647,25 @@ class VulnerabilityDatabase {
     const fixable = fixabilityRows.find((row) => row.is_fixable === 1)?.count ?? 0;
     const notFixable = fixabilityRows.find((row) => row.is_fixable === 0)?.count ?? 0;
 
+    // Updated to properly correlate with remediation records
+    // A vulnerability is considered "remediated" if it has at least one remediation record with a remediation_date
     const statusRows = this.db.prepare(`
-      SELECT CASE WHEN deactivated_on IS NULL THEN 'active' ELSE 'deactivated' END as status,
-             COUNT(*) as count
+      SELECT
+        CASE
+          WHEN EXISTS (
+            SELECT 1 FROM vulnerability_remediations vr
+            WHERE vr.vulnerability_id = vulnerabilities.id
+            AND vr.remediation_date IS NOT NULL
+          ) THEN 'remediated'
+          ELSE 'active'
+        END as status,
+        COUNT(*) as count
       FROM vulnerabilities
       ${where}
       GROUP BY status;
     `).all(params);
     const active = statusRows.find((row) => row.status === 'active')?.count ?? 0;
-    const deactivated = statusRows.find((row) => row.status === 'deactivated')?.count ?? 0;
+    const remediated = statusRows.find((row) => row.status === 'remediated')?.count ?? 0;
 
     const uniques = this.db.prepare(`
       SELECT
@@ -681,6 +691,9 @@ class VulnerabilityDatabase {
 
     const lastSync = this.db.prepare('SELECT sync_date FROM sync_history ORDER BY id DESC LIMIT 1').get();
 
+    // Get remediation statistics
+    const remediationStats = this._getRemediationStatistics(where, params);
+
     return {
       totalCount: total,
       bySeverity,
@@ -688,11 +701,92 @@ class VulnerabilityDatabase {
       fixable,
       notFixable,
       active,
-      deactivated,
+      remediated,
+      deactivated: remediated, // Keep for backward compatibility
       uniqueAssets: uniques?.assets ?? 0,
       uniqueCves: uniques?.cves ?? 0,
       averageCvssBySeverity,
       lastSync: lastSync?.sync_date ?? null,
+      remediations: remediationStats,
+    };
+  }
+
+  _getRemediationStatistics(where, params) {
+    // Build the WHERE clause for remediations that match filtered vulnerabilities
+    const remediationWhere = where
+      ? `WHERE EXISTS (
+          SELECT 1 FROM vulnerabilities v
+          ${where.replace(/vulnerabilities\./g, 'v.')}
+          AND vr.vulnerability_id = v.id
+        )`
+      : '';
+
+    // Map params to work with the subquery
+    const remediationParams = { ...params };
+
+    // Total remediations for filtered vulnerabilities
+    const totalRemediations = this.db.prepare(`
+      SELECT COUNT(*) as count
+      FROM vulnerability_remediations vr
+      ${remediationWhere}
+    `).get(remediationParams)?.count ?? 0;
+
+    // Remediations with matching vulnerabilities
+    const remediationsWithVulns = this.db.prepare(`
+      SELECT COUNT(*) as count
+      FROM vulnerability_remediations vr
+      INNER JOIN vulnerabilities v ON vr.vulnerability_id = v.id
+      ${where ? where.replace(/vulnerabilities\./g, 'v.') : ''}
+    `).get(params)?.count ?? 0;
+
+    // Count by remediation status
+    const byStatus = this.db.prepare(`
+      SELECT
+        CASE
+          WHEN vr.remediation_date IS NOT NULL THEN 'remediated'
+          WHEN vr.status = 'overdue' OR vr.status = 'past_due' THEN 'overdue'
+          ELSE 'open'
+        END as remediation_status,
+        COUNT(*) as count
+      FROM vulnerability_remediations vr
+      ${remediationWhere}
+      GROUP BY remediation_status
+    `).all(remediationParams);
+
+    const statusCounts = byStatus.reduce((acc, row) => {
+      acc[row.remediation_status] = row.count;
+      return acc;
+    }, {});
+
+    // On-time vs late remediations
+    const timeliness = this.db.prepare(`
+      SELECT
+        CASE
+          WHEN vr.remediated_on_time = 1 THEN 'on_time'
+          WHEN vr.remediated_on_time = 0 AND vr.remediation_date IS NOT NULL THEN 'late'
+          ELSE 'pending'
+        END as timeliness,
+        COUNT(*) as count
+      FROM vulnerability_remediations vr
+      ${remediationWhere}
+      GROUP BY timeliness
+    `).all(remediationParams);
+
+    const timelinessCounts = timeliness.reduce((acc, row) => {
+      acc[row.timeliness] = row.count;
+      return acc;
+    }, {});
+
+    return {
+      total: totalRemediations,
+      withMatchingVulnerability: remediationsWithVulns,
+      withoutMatchingVulnerability: totalRemediations - remediationsWithVulns,
+      remediated: statusCounts.remediated ?? 0,
+      overdue: statusCounts.overdue ?? 0,
+      open: statusCounts.open ?? 0,
+      onTime: timelinessCounts.on_time ?? 0,
+      late: timelinessCounts.late ?? 0,
+      pending: timelinessCounts.pending ?? 0,
     };
   }
 
