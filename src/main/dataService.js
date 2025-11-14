@@ -471,6 +471,22 @@ class DataService {
     return this.databasePath;
   }
 
+  getAssets(filters = {}) {
+    return this.database.getAssets(filters);
+  }
+
+  getVulnerabilitiesByAsset(assetId, filters = {}) {
+    return this.database.getVulnerabilitiesByAsset(assetId, filters);
+  }
+
+  getCVEs(filters = {}) {
+    return this.database.getCVEs(filters);
+  }
+
+  getAssetsByCVE(cveName, filters = {}) {
+    return this.database.getAssetsByCVE(cveName, filters);
+  }
+
   /**
    * Sets a new database path and reconnects to the database.
    *

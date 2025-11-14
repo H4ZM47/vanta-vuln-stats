@@ -711,6 +711,143 @@ class VulnerabilityDatabase {
     };
   }
 
+  /**
+   * Get all unique assets with vulnerability counts
+   * @param {object} filters - Optional filters to apply
+   * @returns {Array} Array of assets with counts
+   */
+  getAssets(filters = {}) {
+    const { where, params } = this.buildFilters(filters);
+    // Add NULL filtering for target_id
+    const whereClause = where
+      ? `${where} AND target_id IS NOT NULL`
+      : 'WHERE target_id IS NOT NULL';
+
+    const query = `
+      SELECT
+        target_id as assetId,
+        COUNT(*) as vulnerabilityCount,
+        SUM(CASE WHEN deactivated_on IS NULL THEN 1 ELSE 0 END) as activeCount,
+        SUM(CASE WHEN deactivated_on IS NOT NULL THEN 1 ELSE 0 END) as remediatedCount
+      FROM vulnerabilities
+      ${whereClause}
+      GROUP BY target_id
+      ORDER BY vulnerabilityCount DESC, target_id ASC
+    `;
+    return this.db.prepare(query).all(params);
+  }
+
+  /**
+   * Get vulnerabilities for a specific asset
+   * @param {string} assetId - The asset identifier
+   * @param {object} filters - Optional additional filters
+   * @returns {Array} Array of vulnerabilities for the asset
+   */
+  getVulnerabilitiesByAsset(assetId, filters = {}) {
+    const extendedFilters = { ...filters, assetId };
+    const { where, params } = this.buildFilters(extendedFilters);
+    const query = `
+      SELECT id, name, description, severity, first_detected, deactivated_on,
+             is_fixable, cvss_score, integration_id
+      FROM vulnerabilities
+      ${where}
+      ORDER BY
+        CASE severity
+          WHEN 'CRITICAL' THEN 1
+          WHEN 'HIGH' THEN 2
+          WHEN 'MEDIUM' THEN 3
+          WHEN 'LOW' THEN 4
+          ELSE 5
+        END ASC,
+        first_detected DESC
+    `;
+    return this.db.prepare(query).all(params);
+  }
+
+  /**
+   * Get all unique CVEs with vulnerability counts
+   * @param {object} filters - Optional filters to apply
+   * @returns {Array} Array of CVEs with counts and descriptions
+   */
+  getCVEs(filters = {}) {
+    const { where, params } = this.buildFilters(filters);
+    // Add NULL filtering for name (CVE) and fix MAX(severity) to use numeric ordering
+    const whereClause = where
+      ? `${where} AND name IS NOT NULL`
+      : 'WHERE name IS NOT NULL';
+
+    const query = `
+      SELECT
+        name as cveName,
+        MAX(description) as description,
+        COUNT(*) as vulnerabilityCount,
+        SUM(CASE WHEN deactivated_on IS NULL THEN 1 ELSE 0 END) as activeCount,
+        SUM(CASE WHEN deactivated_on IS NOT NULL THEN 1 ELSE 0 END) as remediatedCount,
+        MAX(
+          CASE severity
+            WHEN 'CRITICAL' THEN 1
+            WHEN 'HIGH' THEN 2
+            WHEN 'MEDIUM' THEN 3
+            WHEN 'LOW' THEN 4
+            WHEN 'INFO' THEN 5
+            ELSE 6
+          END
+        ) as severityOrder,
+        CASE MIN(
+          CASE severity
+            WHEN 'CRITICAL' THEN 1
+            WHEN 'HIGH' THEN 2
+            WHEN 'MEDIUM' THEN 3
+            WHEN 'LOW' THEN 4
+            WHEN 'INFO' THEN 5
+            ELSE 6
+          END
+        )
+          WHEN 1 THEN 'CRITICAL'
+          WHEN 2 THEN 'HIGH'
+          WHEN 3 THEN 'MEDIUM'
+          WHEN 4 THEN 'LOW'
+          WHEN 5 THEN 'INFO'
+          ELSE 'UNKNOWN'
+        END as maxSeverity
+      FROM vulnerabilities
+      ${whereClause}
+      GROUP BY name
+      ORDER BY
+        severityOrder ASC,
+        vulnerabilityCount DESC,
+        name ASC
+    `;
+    return this.db.prepare(query).all(params);
+  }
+
+  /**
+   * Get all assets affected by a specific CVE
+   * @param {string} cveName - The CVE name
+   * @param {object} filters - Optional additional filters
+   * @returns {Array} Array of assets affected by the CVE
+   */
+  getAssetsByCVE(cveName, filters = {}) {
+    const extendedFilters = { ...filters, cve: cveName };
+    const { where, params } = this.buildFilters(extendedFilters);
+    const query = `
+      SELECT id, target_id as assetId, severity, first_detected, deactivated_on,
+             integration_id, is_fixable, cvss_score
+      FROM vulnerabilities
+      ${where}
+      ORDER BY
+        CASE severity
+          WHEN 'CRITICAL' THEN 1
+          WHEN 'HIGH' THEN 2
+          WHEN 'MEDIUM' THEN 3
+          WHEN 'LOW' THEN 4
+          ELSE 5
+        END ASC,
+        first_detected DESC
+    `;
+    return this.db.prepare(query).all(params);
+  }
+
   _getRemediationStatistics(where, params) {
     // Build the WHERE clause for remediations that match filtered vulnerabilities
     const remediationWhere = where

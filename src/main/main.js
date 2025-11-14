@@ -118,3 +118,15 @@ ipcMain.handle('sync:resume', () => dataService.resumeSync());
 ipcMain.handle('sync:stop', () => dataService.stopSync());
 
 ipcMain.handle('sync:state', () => dataService.getSyncState());
+
+ipcMain.handle('assets:list', (event, filters) => dataService.getAssets(filters ?? {}));
+
+ipcMain.handle('assets:vulnerabilities', (event, assetId, filters) =>
+  dataService.getVulnerabilitiesByAsset(assetId, filters ?? {})
+);
+
+ipcMain.handle('cves:list', (event, filters) => dataService.getCVEs(filters ?? {}));
+
+ipcMain.handle('cves:assets', (event, cveName, filters) =>
+  dataService.getAssetsByCVE(cveName, filters ?? {})
+);

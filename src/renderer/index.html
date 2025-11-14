@@ -42,6 +42,14 @@
           <p>Filter, browse, and inspect synchronized vulnerabilities.</p>
         </header>
         <div class="card__body">
+          <nav class="explorer-tabs">
+            <button class="explorer-tab-button active" data-explorer-tab="list">All Vulnerabilities</button>
+            <button class="explorer-tab-button" data-explorer-tab="by-asset">By Asset</button>
+            <button class="explorer-tab-button" data-explorer-tab="by-cve">By CVE</button>
+          </nav>
+
+          <!-- Tab 1: All Vulnerabilities (existing view) -->
+          <div id="explorerListTab" class="explorer-tab-content active">
           <form id="filters" class="filters">
             <div class="filter-group">
               <label>
@@ -143,6 +151,99 @@
             <div class="pagination-controls">
               <button id="prevPage" class="secondary">Previous</button>
               <button id="nextPage" class="secondary">Next</button>
+            </div>
+          </div>
+          </div>
+
+          <!-- Tab 2: By Asset -->
+          <div id="explorerAssetTab" class="explorer-tab-content">
+            <div class="two-pane-view">
+              <div class="left-pane">
+                <h3>Assets</h3>
+                <div class="search-box">
+                  <input type="text" id="assetSearch" placeholder="Search assets..." />
+                </div>
+                <div class="list-container">
+                  <ul id="assetList" class="explorer-list"></ul>
+                </div>
+                <div class="list-footer">
+                  <span id="assetCount"></span>
+                  <div class="pagination-controls">
+                    <button id="prevAssetPage" class="btn btn-secondary btn-small">&larr; Prev</button>
+                    <span id="assetPaginationStatus"></span>
+                    <button id="nextAssetPage" class="btn btn-secondary btn-small">Next &rarr;</button>
+                    <select id="assetPageSize" class="page-size-selector">
+                      <option value="25">25 / page</option>
+                      <option value="50">50 / page</option>
+                      <option value="100">100 / page</option>
+                      <option value="250">250 / page</option>
+                      <option value="500">500 / page</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+              <div class="right-pane">
+                <h3 id="assetVulnTitle">Select an asset</h3>
+                <div class="table-wrapper">
+                  <table class="data-table">
+                    <thead>
+                      <tr>
+                        <th>Name</th>
+                        <th>Severity</th>
+                        <th>Detected</th>
+                        <th>Status</th>
+                      </tr>
+                    </thead>
+                    <tbody id="assetVulnTable"></tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Tab 3: By CVE -->
+          <div id="explorerCveTab" class="explorer-tab-content">
+            <div class="two-pane-view">
+              <div class="left-pane">
+                <h3>CVEs</h3>
+                <div class="search-box">
+                  <input type="text" id="cveSearch" placeholder="Search CVEs..." />
+                </div>
+                <div class="list-container">
+                  <ul id="cveList" class="explorer-list"></ul>
+                </div>
+                <div class="list-footer">
+                  <span id="cveCount"></span>
+                  <div class="pagination-controls">
+                    <button id="prevCvePage" class="btn btn-secondary btn-small">&larr; Prev</button>
+                    <span id="cvePaginationStatus"></span>
+                    <button id="nextCvePage" class="btn btn-secondary btn-small">Next &rarr;</button>
+                    <select id="cvePageSize" class="page-size-selector">
+                      <option value="25">25 / page</option>
+                      <option value="50">50 / page</option>
+                      <option value="100">100 / page</option>
+                      <option value="250">250 / page</option>
+                      <option value="500">500 / page</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+              <div class="right-pane">
+                <h3 id="cveAssetTitle">Select a CVE</h3>
+                <div class="table-wrapper">
+                  <table class="data-table">
+                    <thead>
+                      <tr>
+                        <th>Asset</th>
+                        <th>Severity</th>
+                        <th>Detected</th>
+                        <th>Status</th>
+                      </tr>
+                    </thead>
+                    <tbody id="cveAssetTable"></tbody>
+                  </table>
+                </div>
+              </div>
             </div>
           </div>
         </div>
