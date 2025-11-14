@@ -61,6 +61,24 @@ class VulnerabilityDatabase {
           updated_at = excluded.updated_at,
           raw_data = excluded.raw_data
       `),
+      selectAssetRaw: this.db.prepare('SELECT raw_data FROM vulnerable_assets WHERE id = ?'),
+      upsertAsset: this.db.prepare(`
+        INSERT INTO vulnerable_assets (
+          id, name, asset_type, has_been_scanned, image_scan_tag, scanners,
+          updated_at, raw_data
+        ) VALUES (
+          @id, @name, @asset_type, @has_been_scanned, @image_scan_tag, @scanners,
+          @updated_at, @raw_data
+        )
+        ON CONFLICT(id) DO UPDATE SET
+          name = excluded.name,
+          asset_type = excluded.asset_type,
+          has_been_scanned = excluded.has_been_scanned,
+          image_scan_tag = excluded.image_scan_tag,
+          scanners = excluded.scanners,
+          updated_at = excluded.updated_at,
+          raw_data = excluded.raw_data
+      `),
       selectRemediationRaw: this.db.prepare('SELECT raw_data FROM vulnerability_remediations WHERE id = ?'),
       upsertRemediation: this.db.prepare(`
         INSERT INTO vulnerability_remediations (
@@ -189,6 +207,19 @@ class VulnerabilityDatabase {
       );
     `);
 
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS vulnerable_assets (
+        id TEXT PRIMARY KEY,
+        name TEXT,
+        asset_type TEXT,
+        has_been_scanned INTEGER,
+        image_scan_tag TEXT,
+        scanners TEXT,
+        updated_at TEXT NOT NULL,
+        raw_data TEXT NOT NULL
+      );
+    `);
+
     // Migration: Add missing columns to sync_history if they don't exist
     this._migrateSyncHistoryColumns();
 
@@ -198,6 +229,8 @@ class VulnerabilityDatabase {
     this.db.exec('CREATE INDEX IF NOT EXISTS idx_vulnerabilities_fixable ON vulnerabilities(is_fixable);');
     this.db.exec('CREATE INDEX IF NOT EXISTS idx_vulnerabilities_integration ON vulnerabilities(integration_id);');
     this.db.exec('CREATE INDEX IF NOT EXISTS idx_remediations_vulnerability ON vulnerability_remediations(vulnerability_id);');
+    this.db.exec('CREATE INDEX IF NOT EXISTS idx_assets_type ON vulnerable_assets(asset_type);');
+    this.db.exec('CREATE INDEX IF NOT EXISTS idx_assets_name ON vulnerable_assets(name);');
   }
 
   _migrateSyncHistoryColumns() {
@@ -285,6 +318,20 @@ class VulnerabilityDatabase {
       status: remediation.status || null,
       updated_at: dayjs().toISOString(),
       raw_data: JSON.stringify(remediation),
+    };
+    return data;
+  }
+
+  _normaliseAsset(asset) {
+    const data = {
+      id: asset.id,
+      name: asset.name || null,
+      asset_type: asset.assetType || null,
+      has_been_scanned: asset.hasBeenScanned ? 1 : 0,
+      image_scan_tag: asset.imageScanTag || null,
+      scanners: Array.isArray(asset.scanners) ? JSON.stringify(asset.scanners) : null,
+      updated_at: dayjs().toISOString(),
+      raw_data: JSON.stringify(asset),
     };
     return data;
   }
@@ -459,6 +506,53 @@ class VulnerabilityDatabase {
     });
 
     return tx(remediations);
+  }
+
+  storeAssetsBatch(assets) {
+    const tx = this.db.transaction((rows) => {
+      let newCount = 0;
+      let updatedCount = 0;
+      const now = dayjs().toISOString();
+
+      // Batch lookup: Get all existing records in one query
+      const ids = rows.filter(row => row?.id).map(row => row.id);
+      if (ids.length === 0) {
+        return { new: 0, updated: 0, total: 0 };
+      }
+
+      const placeholders = ids.map(() => '?').join(',');
+      const existingRecords = this.db.prepare(
+        `SELECT id, raw_data FROM vulnerable_assets WHERE id IN (${placeholders})`
+      ).all(...ids);
+
+      // Build lookup map for O(1) access
+      const existingMap = new Map(
+        existingRecords.map(rec => [rec.id, rec.raw_data])
+      );
+
+      rows.forEach((row) => {
+        if (!row?.id) {
+          return;
+        }
+        const payload = this._normaliseAsset(row);
+        payload.updated_at = now;
+
+        const existingRawData = existingMap.get(row.id);
+        if (!existingRawData) {
+          newCount += 1;
+        } else if (existingRawData !== payload.raw_data) {
+          updatedCount += 1;
+        }
+        this.statements.upsertAsset.run(payload);
+
+        // Update map so duplicate IDs within same batch are treated as updates
+        existingMap.set(row.id, payload.raw_data);
+      });
+
+      return { new: newCount, updated: updatedCount, total: rows.length };
+    });
+
+    return tx(assets);
   }
 
   buildFilters(filters = {}) {
@@ -720,19 +814,22 @@ class VulnerabilityDatabase {
     const { where, params } = this.buildFilters(filters);
     // Add NULL filtering for target_id
     const whereClause = where
-      ? `${where} AND target_id IS NOT NULL`
-      : 'WHERE target_id IS NOT NULL';
+      ? `${where} AND v.target_id IS NOT NULL`
+      : 'WHERE v.target_id IS NOT NULL';
 
     const query = `
       SELECT
-        target_id as assetId,
+        v.target_id as assetId,
+        COALESCE(a.name, v.target_id) as assetName,
+        a.asset_type as assetType,
         COUNT(*) as vulnerabilityCount,
-        SUM(CASE WHEN deactivated_on IS NULL THEN 1 ELSE 0 END) as activeCount,
-        SUM(CASE WHEN deactivated_on IS NOT NULL THEN 1 ELSE 0 END) as remediatedCount
-      FROM vulnerabilities
+        SUM(CASE WHEN v.deactivated_on IS NULL THEN 1 ELSE 0 END) as activeCount,
+        SUM(CASE WHEN v.deactivated_on IS NOT NULL THEN 1 ELSE 0 END) as remediatedCount
+      FROM vulnerabilities v
+      LEFT JOIN vulnerable_assets a ON v.target_id = a.id
       ${whereClause}
-      GROUP BY target_id
-      ORDER BY vulnerabilityCount DESC, target_id ASC
+      GROUP BY v.target_id, a.name, a.asset_type
+      ORDER BY vulnerabilityCount DESC, assetName ASC
     `;
     return this.db.prepare(query).all(params);
   }
