@@ -569,6 +569,44 @@ class DataService {
   }
 
   /**
+   * Get paginated list of vulnerable assets with filters and sorting.
+   *
+   * @param {Object} [options={}] - Query options
+   * @param {Object} [options.filters={}] - Filter options
+   * @param {number} [options.limit=100] - Maximum number of results
+   * @param {number} [options.offset=0] - Result offset for pagination
+   * @param {string} [options.sortColumn='vulnerability_count'] - Column to sort by
+   * @param {string} [options.sortDirection='desc'] - Sort direction (asc/desc)
+   * @returns {Object} Object with data array and total count
+   */
+  getVulnerableAssets(options = {}) {
+    const { filters = {}, limit = 100, offset = 0, sortColumn = 'vulnerability_count', sortDirection = 'desc' } = options;
+    const data = this.database.getVulnerableAssets({ filters, limit, offset, sortColumn, sortDirection });
+    const total = this.database.getVulnerableAssetCount(filters);
+    return { data, total };
+  }
+
+  /**
+   * Get full details for a specific vulnerable asset.
+   *
+   * @param {string} id - Asset ID
+   * @returns {Object|null} Asset details with parsed raw_data, or null if not found
+   */
+  getVulnerableAssetDetails(id) {
+    return this.database.getVulnerableAssetDetails(id);
+  }
+
+  /**
+   * Get all vulnerabilities for a specific asset.
+   *
+   * @param {string} assetId - Asset ID
+   * @returns {Array} Array of vulnerability records for the asset
+   */
+  getVulnerabilitiesForAsset(assetId) {
+    return this.database.getVulnerabilitiesForAsset(assetId);
+  }
+
+  /**
    * Sets a new database path and reconnects to the database.
    *
    * @param {string} newPath - The new database file path

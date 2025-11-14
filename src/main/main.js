@@ -127,6 +127,14 @@ ipcMain.handle('assets:vulnerabilities', (event, assetId, filters) =>
 
 ipcMain.handle('assets:details', (event, assetId) => dataService.getAssetDetails(assetId));
 
+ipcMain.handle('vulnerable-assets:list', (event, options) => dataService.getVulnerableAssets(options ?? {}));
+
+ipcMain.handle('vulnerable-assets:details', (event, id) => dataService.getVulnerableAssetDetails(id));
+
+ipcMain.handle('vulnerable-assets:vulnerabilities', (event, assetId) =>
+  dataService.getVulnerabilitiesForAsset(assetId)
+);
+
 ipcMain.handle('cves:list', (event, filters) => dataService.getCVEs(filters ?? {}));
 
 ipcMain.handle('cves:assets', (event, cveName, filters) =>
