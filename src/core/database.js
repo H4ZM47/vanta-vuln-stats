@@ -197,6 +197,7 @@ class VulnerabilityDatabase {
     this.db.exec('CREATE INDEX IF NOT EXISTS idx_vulnerabilities_deactivated ON vulnerabilities(deactivated_on);');
     this.db.exec('CREATE INDEX IF NOT EXISTS idx_vulnerabilities_fixable ON vulnerabilities(is_fixable);');
     this.db.exec('CREATE INDEX IF NOT EXISTS idx_vulnerabilities_integration ON vulnerabilities(integration_id);');
+    this.db.exec('CREATE INDEX IF NOT EXISTS idx_remediations_vulnerability ON vulnerability_remediations(vulnerability_id);');
   }
 
   _migrateSyncHistoryColumns() {
@@ -475,7 +476,12 @@ class VulnerabilityDatabase {
     if (filters.status === 'active') {
       clauses.push('deactivated_on IS NULL');
     } else if (filters.status === 'deactivated') {
-      clauses.push('deactivated_on IS NOT NULL');
+      // "Remediated" means the vulnerability has at least one remediation record with a remediation_date
+      clauses.push(`EXISTS (
+        SELECT 1 FROM vulnerability_remediations vr
+        WHERE vr.vulnerability_id = vulnerabilities.id
+        AND vr.remediation_date IS NOT NULL
+      )`);
     }
 
     if (filters.fixable === 'fixable') {
