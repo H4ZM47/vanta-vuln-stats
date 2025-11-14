@@ -121,6 +121,16 @@ class VantaApiClient {
           continue;
         }
 
+        // Log 500 error response for debugging - helps diagnose API behavior
+        // DO NOT automatically treat as success - real errors must surface
+        if (status && status >= 500 && error?.response?.data) {
+          const errorBody = error.response.data;
+          console.warn(
+            `[VantaApiClient] ${endpoint} returned ${status}. Error response:`,
+            JSON.stringify(errorBody, null, 2),
+          );
+        }
+
         const requestId =
           error?.response?.headers?.['x-amzn-requestid'] ||
           error?.response?.headers?.['x-amz-cf-id'] ||
