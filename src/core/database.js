@@ -718,6 +718,11 @@ class VulnerabilityDatabase {
    */
   getAssets(filters = {}) {
     const { where, params } = this.buildFilters(filters);
+    // Add NULL filtering for target_id
+    const whereClause = where
+      ? `${where} AND target_id IS NOT NULL`
+      : 'WHERE target_id IS NOT NULL';
+
     const query = `
       SELECT
         target_id as assetId,
@@ -725,7 +730,7 @@ class VulnerabilityDatabase {
         SUM(CASE WHEN deactivated_on IS NULL THEN 1 ELSE 0 END) as activeCount,
         SUM(CASE WHEN deactivated_on IS NOT NULL THEN 1 ELSE 0 END) as remediatedCount
       FROM vulnerabilities
-      ${where}
+      ${whereClause}
       GROUP BY target_id
       ORDER BY vulnerabilityCount DESC, target_id ASC
     `;
@@ -766,25 +771,50 @@ class VulnerabilityDatabase {
    */
   getCVEs(filters = {}) {
     const { where, params } = this.buildFilters(filters);
+    // Add NULL filtering for name (CVE) and fix MAX(severity) to use numeric ordering
+    const whereClause = where
+      ? `${where} AND name IS NOT NULL`
+      : 'WHERE name IS NOT NULL';
+
     const query = `
       SELECT
         name as cveName,
-        description,
+        MAX(description) as description,
         COUNT(*) as vulnerabilityCount,
         SUM(CASE WHEN deactivated_on IS NULL THEN 1 ELSE 0 END) as activeCount,
         SUM(CASE WHEN deactivated_on IS NOT NULL THEN 1 ELSE 0 END) as remediatedCount,
-        MAX(severity) as maxSeverity
+        MAX(
+          CASE severity
+            WHEN 'CRITICAL' THEN 1
+            WHEN 'HIGH' THEN 2
+            WHEN 'MEDIUM' THEN 3
+            WHEN 'LOW' THEN 4
+            WHEN 'INFO' THEN 5
+            ELSE 6
+          END
+        ) as severityOrder,
+        CASE MIN(
+          CASE severity
+            WHEN 'CRITICAL' THEN 1
+            WHEN 'HIGH' THEN 2
+            WHEN 'MEDIUM' THEN 3
+            WHEN 'LOW' THEN 4
+            WHEN 'INFO' THEN 5
+            ELSE 6
+          END
+        )
+          WHEN 1 THEN 'CRITICAL'
+          WHEN 2 THEN 'HIGH'
+          WHEN 3 THEN 'MEDIUM'
+          WHEN 4 THEN 'LOW'
+          WHEN 5 THEN 'INFO'
+          ELSE 'UNKNOWN'
+        END as maxSeverity
       FROM vulnerabilities
-      ${where}
-      GROUP BY name, description
+      ${whereClause}
+      GROUP BY name
       ORDER BY
-        CASE maxSeverity
-          WHEN 'CRITICAL' THEN 1
-          WHEN 'HIGH' THEN 2
-          WHEN 'MEDIUM' THEN 3
-          WHEN 'LOW' THEN 4
-          ELSE 5
-        END ASC,
+        severityOrder ASC,
         vulnerabilityCount DESC,
         name ASC
     `;
