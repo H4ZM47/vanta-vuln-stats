@@ -1286,7 +1286,7 @@ const attachEventListeners = () => {
   elements.nextAssetPage.addEventListener('click', () => {
     const searchTerm = state.assetSearchTerm.toLowerCase();
     const filteredAssets = state.assets.filter((asset) =>
-      asset.assetId?.toLowerCase().includes(searchTerm)
+      (asset.assetId || '').toLowerCase().includes(searchTerm)
     );
     const maxPage = Math.ceil(filteredAssets.length / state.assetPageSize);
     if (state.assetPage < maxPage) {

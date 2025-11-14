@@ -291,3 +291,43 @@ test('getStatistics with filters correctly correlates remediations', () => {
     cleanupDb(db);
   }
 });
+
+test('active status filter uses remediation-based classification', () => {
+  const db = createTempDb();
+
+  try {
+    // v-1 looks deactivated but has no remediation records, so it should be treated as active
+    // v-2 has a remediation record with a remediation_date, so it should be treated as remediated
+    const vulnerabilities = [
+      {
+        id: 'v-1',
+        name: 'Deactivated but still active',
+        severity: 'HIGH',
+        deactivateMetadata: { deactivatedOnDate: '2024-02-01' },
+      },
+      {
+        id: 'v-2',
+        name: 'Has remediation record',
+        severity: 'LOW',
+      },
+    ];
+    db.storeVulnerabilitiesBatch(vulnerabilities);
+
+    const remediations = [
+      {
+        id: 'r-1',
+        vulnerabilityId: 'v-2',
+        status: 'closed',
+        remediationDate: '2024-02-10',
+      },
+    ];
+    db.storeRemediationsBatch(remediations);
+
+    const stats = db.getStatistics({ status: 'active' });
+    assert.equal(stats.totalCount, 1, 'Active filter should include v-1 even with deactivated_on set');
+    assert.equal(stats.active, 1, 'Active count should reflect remediation-based classification');
+    assert.equal(stats.remediated, 0, 'Remediated count should be zero after active filter applied');
+  } finally {
+    cleanupDb(db);
+  }
+});
