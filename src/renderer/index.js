@@ -5,6 +5,27 @@ const elements = {
   tabButtons: document.querySelectorAll('.tab-button'),
   vulnerabilitiesTab: document.getElementById('vulnerabilitiesTab'),
   settingsTab: document.getElementById('settingsTab'),
+
+  // Explorer tab navigation
+  explorerTabButtons: document.querySelectorAll('.explorer-tab-button'),
+  explorerListTab: document.getElementById('explorerListTab'),
+  explorerAssetTab: document.getElementById('explorerAssetTab'),
+  explorerCveTab: document.getElementById('explorerCveTab'),
+
+  // Asset view
+  assetSearch: document.getElementById('assetSearch'),
+  assetList: document.getElementById('assetList'),
+  assetCount: document.getElementById('assetCount'),
+  assetVulnTitle: document.getElementById('assetVulnTitle'),
+  assetVulnTable: document.getElementById('assetVulnTable'),
+
+  // CVE view
+  cveSearch: document.getElementById('cveSearch'),
+  cveList: document.getElementById('cveList'),
+  cveCount: document.getElementById('cveCount'),
+  cveAssetTitle: document.getElementById('cveAssetTitle'),
+  cveAssetTable: document.getElementById('cveAssetTable'),
+
   reportForm: document.getElementById('reportForm'),
   reportFormat: document.getElementById('reportFormat'),
   includeRemediations: document.getElementById('includeRemediations'),
@@ -91,6 +112,13 @@ const state = {
   sortColumn: 'first_detected',
   sortDirection: 'desc',
   syncState: 'idle', // idle, running, paused, stopping
+  explorerTab: 'list', // list, by-asset, by-cve
+  assets: [],
+  selectedAsset: null,
+  assetSearchTerm: '',
+  cves: [],
+  selectedCve: null,
+  cveSearchTerm: '',
 };
 
 const toISODate = (value) => {
@@ -136,6 +164,36 @@ const switchTab = (tabName) => {
   } else if (tabName === 'settings') {
     elements.settingsTab.classList.add('active');
     elements.vulnerabilitiesTab.classList.remove('active');
+  }
+};
+
+const switchExplorerTab = (tabName) => {
+  state.explorerTab = tabName;
+
+  // Update tab buttons
+  elements.explorerTabButtons.forEach((button) => {
+    if (button.getAttribute('data-explorer-tab') === tabName) {
+      button.classList.add('active');
+    } else {
+      button.classList.remove('active');
+    }
+  });
+
+  // Update tab content
+  if (tabName === 'list') {
+    elements.explorerListTab.classList.add('active');
+    elements.explorerAssetTab.classList.remove('active');
+    elements.explorerCveTab.classList.remove('active');
+  } else if (tabName === 'by-asset') {
+    elements.explorerListTab.classList.remove('active');
+    elements.explorerAssetTab.classList.add('active');
+    elements.explorerCveTab.classList.remove('active');
+    loadAssets();
+  } else if (tabName === 'by-cve') {
+    elements.explorerListTab.classList.remove('active');
+    elements.explorerAssetTab.classList.remove('active');
+    elements.explorerCveTab.classList.add('active');
+    loadCVEs();
   }
 };
 
@@ -326,7 +384,10 @@ const renderVulnerabilities = () => {
 
   elements.vulnerabilityTable.innerHTML = state.vulnerabilities
     .map((item) => {
-      const statusLabel = item.deactivated_on ? 'Remediated' : 'Active';
+      const isRemediated = item.deactivated_on;
+      const statusLabel = isRemediated ? 'Remediated' : 'Active';
+      const statusClass = isRemediated ? 'status-chip remediated' : 'status-chip active';
+      const statusIcon = isRemediated ? '✓' : '●';
       const severityClass = item.severity ? `severity-chip ${item.severity}` : '';
       const isSelected = state.selectedId === item.id ? 'selected' : '';
       return `
@@ -337,7 +398,7 @@ const renderVulnerabilities = () => {
           <td>${item.integration_id || '—'}</td>
           <td>${item.target_id || '—'}</td>
           <td>${formatDate(item.first_detected)}</td>
-          <td>${statusLabel}</td>
+          <td><span class="${statusClass}">${statusIcon} ${statusLabel}</span></td>
         </tr>
       `;
     })
@@ -392,6 +453,130 @@ const renderDetails = (vulnerability, remediations) => {
       .map((item) => `${formatDate(item.remediationDate || item.detectedDate)} — ${item.status || 'Unknown status'}`)
       .join('\n');
   }
+};
+
+const renderAssets = () => {
+  const searchTerm = state.assetSearchTerm.toLowerCase();
+  const filteredAssets = state.assets.filter((asset) =>
+    asset.assetId?.toLowerCase().includes(searchTerm)
+  );
+
+  if (!filteredAssets.length) {
+    elements.assetList.innerHTML = '<li style="padding: 2rem; text-align: center; color: rgba(148, 163, 184, 0.6);">No assets found</li>';
+    elements.assetCount.textContent = '0 assets';
+    return;
+  }
+
+  elements.assetList.innerHTML = filteredAssets
+    .map((asset) => {
+      const isSelected = state.selectedAsset === asset.assetId ? 'selected' : '';
+      return `
+        <li class="${isSelected}" data-asset-id="${asset.assetId}">
+          <div class="item-name">${asset.assetId || 'Unknown Asset'}</div>
+          <div class="item-count">${formatNumber(asset.vulnerabilityCount)} vulnerabilities (${formatNumber(asset.activeCount)} active, ${formatNumber(asset.remediatedCount)} remediated)</div>
+        </li>
+      `;
+    })
+    .join('');
+
+  elements.assetCount.textContent = `${formatNumber(filteredAssets.length)} assets`;
+};
+
+const renderAssetVulnerabilities = (vulnerabilities) => {
+  if (!state.selectedAsset) {
+    elements.assetVulnTable.innerHTML = '<tr><td colspan="4" style="text-align: center; padding: 2rem; color: rgba(148, 163, 184, 0.6);">Select an asset to view vulnerabilities</td></tr>';
+    elements.assetVulnTitle.textContent = 'Select an asset';
+    return;
+  }
+
+  elements.assetVulnTitle.textContent = `Vulnerabilities for ${state.selectedAsset}`;
+
+  if (!vulnerabilities || !vulnerabilities.length) {
+    elements.assetVulnTable.innerHTML = '<tr><td colspan="4" style="text-align: center; padding: 2rem; color: rgba(148, 163, 184, 0.6);">No vulnerabilities found</td></tr>';
+    return;
+  }
+
+  elements.assetVulnTable.innerHTML = vulnerabilities
+    .map((vuln) => {
+      const isRemediated = vuln.deactivated_on;
+      const statusLabel = isRemediated ? 'Remediated' : 'Active';
+      const statusClass = isRemediated ? 'status-chip remediated' : 'status-chip active';
+      const statusIcon = isRemediated ? '✓' : '●';
+      const severityClass = vuln.severity ? `severity-chip ${vuln.severity}` : '';
+      return `
+        <tr>
+          <td>${vuln.name || '—'}</td>
+          <td><span class="${severityClass}">${vuln.severity || 'UNKNOWN'}</span></td>
+          <td>${formatDate(vuln.first_detected)}</td>
+          <td><span class="${statusClass}">${statusIcon} ${statusLabel}</span></td>
+        </tr>
+      `;
+    })
+    .join('');
+};
+
+const renderCVEs = () => {
+  const searchTerm = state.cveSearchTerm.toLowerCase();
+  const filteredCVEs = state.cves.filter((cve) =>
+    cve.cveName?.toLowerCase().includes(searchTerm) || cve.description?.toLowerCase().includes(searchTerm)
+  );
+
+  if (!filteredCVEs.length) {
+    elements.cveList.innerHTML = '<li style="padding: 2rem; text-align: center; color: rgba(148, 163, 184, 0.6);">No CVEs found</li>';
+    elements.cveCount.textContent = '0 CVEs';
+    return;
+  }
+
+  elements.cveList.innerHTML = filteredCVEs
+    .map((cve) => {
+      const isSelected = state.selectedCve === cve.cveName ? 'selected' : '';
+      const truncatedDesc = cve.description && cve.description.length > 100
+        ? cve.description.substring(0, 100) + '...'
+        : cve.description || 'No description available';
+      return `
+        <li class="${isSelected}" data-cve-name="${cve.cveName}">
+          <div class="item-name">${cve.cveName || 'Unknown CVE'}</div>
+          <div class="item-description">${truncatedDesc}</div>
+          <div class="item-count">${formatNumber(cve.vulnerabilityCount)} assets affected (${formatNumber(cve.activeCount)} active, ${formatNumber(cve.remediatedCount)} remediated)</div>
+        </li>
+      `;
+    })
+    .join('');
+
+  elements.cveCount.textContent = `${formatNumber(filteredCVEs.length)} CVEs`;
+};
+
+const renderCVEAssets = (assets) => {
+  if (!state.selectedCve) {
+    elements.cveAssetTable.innerHTML = '<tr><td colspan="4" style="text-align: center; padding: 2rem; color: rgba(148, 163, 184, 0.6);">Select a CVE to view affected assets</td></tr>';
+    elements.cveAssetTitle.textContent = 'Select a CVE';
+    return;
+  }
+
+  elements.cveAssetTitle.textContent = `Assets affected by ${state.selectedCve}`;
+
+  if (!assets || !assets.length) {
+    elements.cveAssetTable.innerHTML = '<tr><td colspan="4" style="text-align: center; padding: 2rem; color: rgba(148, 163, 184, 0.6);">No assets found</td></tr>';
+    return;
+  }
+
+  elements.cveAssetTable.innerHTML = assets
+    .map((asset) => {
+      const isRemediated = asset.deactivated_on;
+      const statusLabel = isRemediated ? 'Remediated' : 'Active';
+      const statusClass = isRemediated ? 'status-chip remediated' : 'status-chip active';
+      const statusIcon = isRemediated ? '✓' : '●';
+      const severityClass = asset.severity ? `severity-chip ${asset.severity}` : '';
+      return `
+        <tr>
+          <td>${asset.assetId || '—'}</td>
+          <td><span class="${severityClass}">${asset.severity || 'UNKNOWN'}</span></td>
+          <td>${formatDate(asset.first_detected)}</td>
+          <td><span class="${statusClass}">${statusIcon} ${statusLabel}</span></td>
+        </tr>
+      `;
+    })
+    .join('');
 };
 
 const getFiltersFromInputs = () => ({
@@ -458,6 +643,36 @@ const loadVulnerabilities = async () => {
   renderVulnerabilities();
   renderPagination();
   renderSortIndicators();
+};
+
+const loadAssets = async () => {
+  state.assets = await window.vanta.getAssets(state.filters);
+  renderAssets();
+  if (!state.selectedAsset) {
+    renderAssetVulnerabilities(null);
+  }
+};
+
+const selectAsset = async (assetId) => {
+  state.selectedAsset = assetId;
+  renderAssets();
+  const vulnerabilities = await window.vanta.getVulnerabilitiesByAsset(assetId, state.filters);
+  renderAssetVulnerabilities(vulnerabilities);
+};
+
+const loadCVEs = async () => {
+  state.cves = await window.vanta.getCVEs(state.filters);
+  renderCVEs();
+  if (!state.selectedCve) {
+    renderCVEAssets(null);
+  }
+};
+
+const selectCVE = async (cveName) => {
+  state.selectedCve = cveName;
+  renderCVEs();
+  const assets = await window.vanta.getAssetsByCVE(cveName, state.filters);
+  renderCVEAssets(assets);
 };
 
 const selectVulnerability = async (id) => {
@@ -724,6 +939,42 @@ const attachEventListeners = () => {
       const tabName = button.getAttribute('data-tab');
       switchTab(tabName);
     });
+  });
+
+  // Explorer tab switching
+  elements.explorerTabButtons.forEach((button) => {
+    button.addEventListener('click', () => {
+      const tabName = button.getAttribute('data-explorer-tab');
+      switchExplorerTab(tabName);
+    });
+  });
+
+  // Asset search
+  elements.assetSearch.addEventListener('input', (event) => {
+    state.assetSearchTerm = event.target.value;
+    renderAssets();
+  });
+
+  // Asset selection
+  elements.assetList.addEventListener('click', (event) => {
+    const listItem = event.target.closest('li[data-asset-id]');
+    if (!listItem) return;
+    const assetId = listItem.getAttribute('data-asset-id');
+    selectAsset(assetId);
+  });
+
+  // CVE search
+  elements.cveSearch.addEventListener('input', (event) => {
+    state.cveSearchTerm = event.target.value;
+    renderCVEs();
+  });
+
+  // CVE selection
+  elements.cveList.addEventListener('click', (event) => {
+    const listItem = event.target.closest('li[data-cve-name]');
+    if (!listItem) return;
+    const cveName = listItem.getAttribute('data-cve-name');
+    selectCVE(cveName);
   });
 
   // Report generation
