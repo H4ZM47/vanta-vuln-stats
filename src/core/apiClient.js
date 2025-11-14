@@ -121,6 +121,28 @@ class VantaApiClient {
           continue;
         }
 
+        // Check if 500 error response contains pagination info indicating end of results
+        // Some API implementations may return 500 with valid pagination data when there are no more pages
+        if (status && status >= 500 && error?.response?.data) {
+          const errorBody = error.response.data;
+          const errorPageInfo = errorBody?.results?.pageInfo ?? {};
+
+          // Log the error response structure for debugging
+          console.warn(
+            `[VantaApiClient] ${endpoint} returned ${status}. Error response data:`,
+            JSON.stringify(errorBody, null, 2),
+          );
+
+          // If the error response explicitly indicates no more pages, treat as end of pagination
+          if (errorPageInfo.hasNextPage === false) {
+            console.warn(
+              `[VantaApiClient] ${endpoint} pagination complete (hasNextPage=false in error response). Returning ${results.length} total results.`,
+            );
+            // Exit the pagination loop by not setting pageCursor
+            break;
+          }
+        }
+
         const requestId =
           error?.response?.headers?.['x-amzn-requestid'] ||
           error?.response?.headers?.['x-amz-cf-id'] ||
