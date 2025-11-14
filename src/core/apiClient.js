@@ -211,6 +211,24 @@ class VantaApiClient {
   }
 
   /**
+   * Fetch assets from the Vanta API
+   * @param {Object} options - Query options
+   * @param {number} [options.pageSize=100] - Number of items per page (1-100)
+   * @param {Function} [options.onBatch] - Callback for each batch of results
+   * @param {Object} [options.filters={}] - Filter parameters supported by the API
+   * @param {AbortSignal} [options.signal] - Abort signal for cancellation
+   * @returns {Promise<Array>} Array of asset objects
+   */
+  async getAssets({ pageSize = MAX_PAGE_SIZE, onBatch, filters = {}, signal } = {}) {
+    return this.paginate({
+      endpoint: '/assets',
+      params: { pageSize, ...filters },
+      onBatch,
+      signal,
+    });
+  }
+
+  /**
    * Fetch vulnerable assets from Vanta API
    * @param {Object} options - Query options
    * @param {number} [options.pageSize=100] - Number of items per page (1-100)
@@ -218,7 +236,7 @@ class VantaApiClient {
    * @param {Object} [options.filters={}] - Filter parameters
    * @param {string} [options.filters.q] - Search query to filter assets
    * @param {string} [options.filters.integrationId] - Filter by scanner integration
-   * @param {string} [options.filters.assetType] - Filter by asset type (CODE_REPOSITORY, CONTAINER_REPOSITORY, etc.)
+   * @param {string} [options.filters.assetType] - Filter by asset type
    * @param {string} [options.filters.assetExternalAccountId] - Filter by external account ID
    * @param {AbortSignal} [options.signal] - Abort signal for cancellation
    * @returns {Promise<Array>} Array of vulnerable asset objects

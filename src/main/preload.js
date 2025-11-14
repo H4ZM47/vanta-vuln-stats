@@ -30,6 +30,7 @@ contextBridge.exposeInMainWorld('vanta', {
   onSyncState: createSubscription('sync:state'),
   getAssets: (filters) => ipcRenderer.invoke('assets:list', filters ?? {}),
   getVulnerabilitiesByAsset: (assetId, filters) => ipcRenderer.invoke('assets:vulnerabilities', assetId, filters ?? {}),
+  getAssetDetails: (assetId) => ipcRenderer.invoke('assets:details', assetId),
   getCVEs: (filters) => ipcRenderer.invoke('cves:list', filters ?? {}),
   getAssetsByCVE: (cveName, filters) => ipcRenderer.invoke('cves:assets', cveName, filters ?? {}),
 });

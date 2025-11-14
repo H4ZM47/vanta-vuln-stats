@@ -161,6 +161,7 @@ class DataService {
           lastSyncDate: incremental ? this.database.getLastSuccessfulSyncDate() : null,
           remediationFilters,
           vulnerabilityFilters,
+          assetFilters: {},
         },
       }
     );
@@ -284,11 +285,11 @@ class DataService {
             flushed: stats.total,
           });
 
-          // Log database flush event
           this.database.logSyncEvent(
             'flush',
-            `Flushed ${stats.total} vulnerable assets to database`,
+            `Flushed ${stats.total} assets to database`,
             {
+              assetStats: stats,
               details: {
                 type: 'assets',
                 batchSize: stats.total,
@@ -303,7 +304,7 @@ class DataService {
         }
       };
 
-      // Fetch vulnerabilities, remediations, and assets in parallel for faster sync
+      // Fetch vulnerabilities and remediations in parallel for faster sync
       await Promise.all([
         apiClient.getVulnerabilities({
           filters: vulnerabilityFilters,
@@ -361,17 +362,17 @@ class DataService {
           },
           signal: this.syncState.abortController.signal,
         }),
-        apiClient.getVulnerableAssets({
+        apiClient.getAssets({
+          filters: {},
           onBatch: async (batch) => {
             await checkPauseOrStop();
             assets.push(...batch);
             processedAssets += batch.length;
             progressCallback?.({ type: 'assets', count: processedAssets });
 
-            // Log API batch fetch
             this.database.logSyncEvent(
               'batch',
-              `Fetched ${batch.length} vulnerable assets from API (total: ${processedAssets})`,
+              `Fetched ${batch.length} assets from API (total: ${processedAssets})`,
               {
                 details: {
                   type: 'assets',
@@ -381,7 +382,6 @@ class DataService {
               }
             );
 
-            // Flush to database when buffer reaches batch size
             if (assets.length >= this.batchSize) {
               flushAssetBuffer();
             }
@@ -404,7 +404,7 @@ class DataService {
       }
 
       // Record combined sync history
-      this.database.recordSyncHistory(vulnerabilitiesStats, remediationsStats);
+      this.database.recordSyncHistory(vulnerabilitiesStats, remediationsStats, assetsStats);
 
       // Log sync completion event
       this.database.logSyncEvent(
@@ -413,11 +413,11 @@ class DataService {
         {
           vulnerabilityStats: vulnerabilitiesStats,
           remediationStats: remediationsStats,
+          assetStats: assetsStats,
           details: {
             totalVulnerabilities: processedVulnerabilities,
             totalRemediations: processedRemediations,
-            totalAssets: processedAssets,
-            assetsStats: assetsStats
+            totalAssets: processedAssets
           }
         }
       );
@@ -549,6 +549,10 @@ class DataService {
 
   getVulnerabilitiesByAsset(assetId, filters = {}) {
     return this.database.getVulnerabilitiesByAsset(assetId, filters);
+  }
+
+  getAssetDetails(assetId) {
+    return this.database.getAssetDetails(assetId);
   }
 
   getCVEs(filters = {}) {

@@ -66,6 +66,23 @@ const scanSources = [
   'SCA'
 ];
 
+const assetTypes = ['Application', 'Server', 'Service', 'Repository', 'Endpoint', 'Database'];
+const assetSubtypesByType = {
+  Application: ['Web', 'API', 'Worker'],
+  Server: ['EC2', 'GCE', 'Azure VM'],
+  Service: ['Lambda', 'Batch Job', 'Background Worker'],
+  Repository: ['GitHub', 'GitLab', 'Bitbucket'],
+  Endpoint: ['Laptop', 'Workstation', 'Mobile'],
+  Database: ['PostgreSQL', 'MySQL', 'MongoDB']
+};
+const assetEnvironments = ['Production', 'Staging', 'Development', 'Sandbox'];
+const assetPlatforms = ['AWS EC2', 'AWS Lambda', 'GCP Compute', 'GCP Cloud Run', 'Azure VM', 'On-Prem', 'Kubernetes', 'Serverless'];
+const assetOwners = ['Security Team', 'SRE Team', 'Platform Team', 'IT Operations', 'DevOps', 'AppSec'];
+const assetRiskLevels = ['LOW', 'MEDIUM', 'HIGH'];
+const assetTagsPool = ['pci', 'sox', 'critical', 'customer-facing', 'internal', 'external', 'public', 'sensitive'];
+
+const assetsMap = new Map();
+
 // Weighted random selection
 function weightedRandom(items, weights) {
   const totalWeight = weights.reduce((sum, w) => sum + w, 0);
@@ -93,6 +110,90 @@ function generateCVEId() {
   const year = randomItem(cvePatterns);
   const number = Math.floor(Math.random() * 50000).toString().padStart(5, '0');
   return `${year}${number}`;
+}
+
+function createAssetRecord(id, integrationId, integrationType, now) {
+  const type = randomItem(assetTypes);
+  const subtypePool = assetSubtypesByType[type] || ['General'];
+  const subtype = randomItem(subtypePool);
+  const environment = randomItem(assetEnvironments);
+  const platform = randomItem(assetPlatforms);
+  const owner = randomItem(assetOwners);
+  const riskLevel = randomItem(assetRiskLevels);
+  const createdDate = randomDate(new Date(now.getTime() - 365 * 24 * 60 * 60 * 1000), now);
+  const lastSeenDate = randomDate(createdDate, now);
+  const tags = Array.from(
+    new Set([
+      environment.toLowerCase(),
+      platform.split(' ')[0].toLowerCase(),
+      subtype.toLowerCase(),
+      randomItem(assetTagsPool)
+    ])
+  ).slice(0, 3);
+
+  const displayName = `${type} ${id}`;
+  const rawData = {
+    id,
+    displayName,
+    integrationId,
+    integrationType,
+    environment,
+    platform,
+    primaryOwner: owner,
+    riskLevel,
+    tags,
+    lastSeen: lastSeenDate.toISOString()
+  };
+
+  return {
+    id,
+    name: displayName,
+    description: `Managed ${type.toLowerCase()} (${subtype}) running in ${environment}.`,
+    asset_type: type,
+    asset_subtype: subtype,
+    integration_id: integrationId,
+    integration_type: integrationType,
+    environment,
+    platform,
+    primary_owner: owner,
+    owners: JSON.stringify([owner]),
+    external_identifier: `${type.slice(0, 3).toUpperCase()}-${Math.floor(Math.random() * 9000 + 1000)}`,
+    risk_level: riskLevel,
+    first_seen: createdDate.toISOString(),
+    last_seen: lastSeenDate.toISOString(),
+    tags: JSON.stringify(tags),
+    created_at: createdDate.toISOString(),
+    updated_at: now.toISOString(),
+    raw_data: JSON.stringify(rawData)
+  };
+}
+
+function registerAsset(targetId, { integrationId, integrationType, lastDetected, now }) {
+  if (!targetId) {
+    return;
+  }
+  if (!assetsMap.has(targetId)) {
+    assetsMap.set(targetId, createAssetRecord(targetId, integrationId, integrationType, now));
+  }
+  const asset = assetsMap.get(targetId);
+  const lastSeenCandidate = lastDetected || asset.last_seen;
+  if (lastSeenCandidate && (!asset.last_seen || lastSeenCandidate > asset.last_seen)) {
+    asset.last_seen = lastSeenCandidate;
+    try {
+      const parsed = JSON.parse(asset.raw_data);
+      parsed.lastSeen = lastSeenCandidate;
+      asset.raw_data = JSON.stringify(parsed);
+    } catch (err) {
+      // Best effort only
+    }
+  }
+  asset.updated_at = now.toISOString();
+  if (!asset.integration_id) {
+    asset.integration_id = integrationId;
+  }
+  if (!asset.integration_type) {
+    asset.integration_type = integrationType;
+  }
 }
 
 function generateVulnerability(id, now) {
@@ -137,6 +238,13 @@ function generateVulnerability(id, now) {
   const name = cveId
     ? `${cveId} in ${packageName}`
     : `${vulnType} in ${packageName}`;
+
+  registerAsset(targetId, {
+    integrationId: integration.id,
+    integrationType: integration.type,
+    lastDetected: lastDetected.toISOString(),
+    now
+  });
 
   const description = `${vulnType} detected in ${packageName} package. ` +
     `${isFixable ? 'A fix is available.' : 'No fix currently available.'} ` +
@@ -348,7 +456,35 @@ db.exec(`
     status TEXT,
     updated_at TEXT NOT NULL,
     raw_data TEXT NOT NULL
+);
+
+// Create assets table
+db.exec(`
+  CREATE TABLE assets (
+    id TEXT PRIMARY KEY,
+    name TEXT,
+    description TEXT,
+    asset_type TEXT,
+    asset_subtype TEXT,
+    integration_id TEXT,
+    integration_type TEXT,
+    environment TEXT,
+    platform TEXT,
+    primary_owner TEXT,
+    owners TEXT,
+    external_identifier TEXT,
+    risk_level TEXT,
+    first_seen TEXT,
+    last_seen TEXT,
+    tags TEXT,
+    created_at TEXT,
+    updated_at TEXT NOT NULL,
+    raw_data TEXT NOT NULL
   );
+
+  CREATE INDEX idx_assets_integration ON assets(integration_id);
+  CREATE INDEX idx_assets_type ON assets(asset_type);
+`);
 `);
 
 // Create sync history table
@@ -366,6 +502,9 @@ db.exec(`
     remediations_count INTEGER,
     remediations_new INTEGER,
     remediations_updated INTEGER,
+    assets_count INTEGER,
+    assets_new INTEGER,
+    assets_updated INTEGER,
     new_count INTEGER,
     updated_count INTEGER,
     remediated_count INTEGER
@@ -398,13 +537,25 @@ const insertRem = db.prepare(`
   )
 `);
 
+const insertAsset = db.prepare(`
+  INSERT INTO assets (
+    id, name, description, asset_type, asset_subtype,
+    integration_id, integration_type, environment, platform,
+    primary_owner, owners, external_identifier, risk_level,
+    first_seen, last_seen, tags, created_at, updated_at, raw_data
+  ) VALUES (
+    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+  )
+`);
+
 const insertSync = db.prepare(`
   INSERT INTO sync_history (
     sync_date, event_type, message, details,
     vulnerabilities_count, vulnerabilities_new, vulnerabilities_updated,
     vulnerabilities_remediated, remediations_count, remediations_new,
-    remediations_updated
-  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    remediations_updated, assets_count, assets_new, assets_updated,
+    new_count, updated_count, remediated_count
+  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `);
 
 // Generate data
@@ -437,6 +588,24 @@ for (let i = 1; i <= vulnerabilityCount; i++) {
 
 insertVulns(vulnerabilities);
 console.log(`✓ Inserted ${vulnerabilityCount} vulnerabilities     `);
+
+// Insert assets captured during vulnerability generation
+const assets = Array.from(assetsMap.values());
+const totalAssets = assets.length;
+const insertAssets = db.transaction((records) => {
+  for (const asset of records) {
+    insertAsset.run(
+      asset.id, asset.name, asset.description, asset.asset_type, asset.asset_subtype,
+      asset.integration_id, asset.integration_type, asset.environment, asset.platform,
+      asset.primary_owner, asset.owners, asset.external_identifier, asset.risk_level,
+      asset.first_seen, asset.last_seen, asset.tags, asset.created_at, asset.updated_at,
+      asset.raw_data
+    );
+  }
+});
+
+insertAssets(assets);
+console.log(`✓ Inserted ${assets.length} assets`);
 
 // Generate remediations (1-3 per vulnerability)
 console.log('✓ Generating remediations...');
@@ -483,7 +652,13 @@ for (let i = 10; i >= 1; i--) {
     vulnerabilities_remediated: 0,
     remediations_count: 0,
     remediations_new: 0,
-    remediations_updated: 0
+    remediations_updated: 0,
+    assets_count: totalAssets,
+    assets_new: 0,
+    assets_updated: 0,
+    new_count: 0,
+    updated_count: 0,
+    remediated_count: 0
   });
 
   // Complete event with stats
@@ -493,6 +668,9 @@ for (let i = 10; i >= 1; i--) {
   const remsNew = Math.floor(Math.random() * 30);
   const remsUpdated = Math.floor(Math.random() * 40);
 
+  const assetsNew = Math.floor(Math.random() * 10);
+  const assetsUpdated = Math.floor(Math.random() * 20);
+
   syncHistory.push({
     sync_date: new Date(syncDate.getTime() + 120000).toISOString(), // 2 min later
     event_type: 'complete',
@@ -500,7 +678,8 @@ for (let i = 10; i >= 1; i--) {
     details: JSON.stringify({
       duration: 120,
       totalVulnerabilities: vulnerabilityCount,
-      totalRemediations: remediations.length
+      totalRemediations: remediations.length,
+      totalAssets
     }),
     vulnerabilities_count: vulnerabilityCount,
     vulnerabilities_new: vulnsNew,
@@ -508,7 +687,13 @@ for (let i = 10; i >= 1; i--) {
     vulnerabilities_remediated: vulnsRemediated,
     remediations_count: remediations.length,
     remediations_new: remsNew,
-    remediations_updated: remsUpdated
+    remediations_updated: remsUpdated,
+    assets_count: totalAssets,
+    assets_new: assetsNew,
+    assets_updated: assetsUpdated,
+    new_count: vulnsNew,
+    updated_count: vulnsUpdated,
+    remediated_count: vulnsRemediated
   });
 }
 
@@ -519,7 +704,9 @@ const insertSyncHistory = db.transaction((syncs) => {
       sync.vulnerabilities_count, sync.vulnerabilities_new,
       sync.vulnerabilities_updated, sync.vulnerabilities_remediated,
       sync.remediations_count, sync.remediations_new,
-      sync.remediations_updated
+      sync.remediations_updated, sync.assets_count, sync.assets_new,
+      sync.assets_updated, sync.new_count, sync.updated_count,
+      sync.remediated_count
     );
   }
 });
@@ -543,6 +730,7 @@ console.log(`\nDatabase Statistics:`);
 console.log(`  File: ${outputPath}`);
 console.log(`  Size: ${fileSizeMB} MB`);
 console.log(`  Vulnerabilities: ${vulnerabilityCount}`);
+console.log(`  Assets: ${totalAssets}`);
 console.log(`  Remediations: ${remediations.length}`);
 console.log(`  Sync History: ${syncHistory.length} events`);
 console.log(`\nSeverity Distribution:`);
