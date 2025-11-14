@@ -164,6 +164,20 @@ class VantaApiClient {
     return results;
   }
 
+  /**
+   * Fetch vulnerabilities from Vanta API
+   * @param {Object} options - Query options
+   * @param {number} [options.pageSize=100] - Number of items per page (1-100)
+   * @param {Function} [options.onBatch] - Callback for each batch of results
+   * @param {Object} [options.filters={}] - Filter parameters
+   * @param {string} [options.filters.integrationId] - Filter by scanner integration
+   * @param {string} [options.filters.severity] - Filter by severity (CRITICAL, HIGH, MEDIUM, LOW)
+   * @param {string} [options.filters.slaDeadlineBeforeDate] - Filter vulnerabilities due before date (ISO 8601)
+   * @param {string} [options.filters.slaDeadlineAfterDate] - Filter vulnerabilities due after date (ISO 8601)
+   * @param {string} [options.filters.vulnerableAssetId] - Filter by vulnerable asset ID
+   * @param {AbortSignal} [options.signal] - Abort signal for cancellation
+   * @returns {Promise<Array>} Array of vulnerability objects
+   */
   async getVulnerabilities({ pageSize = MAX_PAGE_SIZE, onBatch, filters = {}, signal } = {}) {
     return this.paginate({
       endpoint: '/vulnerabilities',
@@ -173,6 +187,20 @@ class VantaApiClient {
     });
   }
 
+  /**
+   * Fetch vulnerability remediations from Vanta API
+   * @param {Object} options - Query options
+   * @param {number} [options.pageSize=100] - Number of items per page (1-100)
+   * @param {Function} [options.onBatch] - Callback for each batch of results
+   * @param {Object} [options.filters={}] - Filter parameters
+   * @param {string} [options.filters.integrationId] - Filter by scanner integration
+   * @param {string} [options.filters.severity] - Filter by severity (CRITICAL, HIGH, MEDIUM, LOW)
+   * @param {boolean} [options.filters.isRemediatedOnTime] - Filter by SLA compliance status
+   * @param {string} [options.filters.remediatedAfterDate] - Filter remediations after date (ISO 8601)
+   * @param {string} [options.filters.remediatedBeforeDate] - Filter remediations before date (ISO 8601)
+   * @param {AbortSignal} [options.signal] - Abort signal for cancellation
+   * @returns {Promise<Array>} Array of remediation objects
+   */
   async getRemediations({ pageSize = MAX_PAGE_SIZE, onBatch, filters = {}, signal } = {}) {
     return this.paginate({
       endpoint: '/vulnerability-remediations',

@@ -84,7 +84,7 @@ ipcMain.handle('database:reset-path', async () => {
   return dataService.getDatabasePath();
 });
 
-ipcMain.handle('sync:run', async () => {
+ipcMain.handle('sync:run', async (event, options = {}) => {
   if (!mainWindow) {
     throw new Error('Application window is not ready.');
   }
@@ -102,7 +102,7 @@ ipcMain.handle('sync:run', async () => {
   };
 
   try {
-    const result = await dataService.syncData(progressEmitter, incrementalUpdateEmitter, stateEmitter);
+    const result = await dataService.syncData(progressEmitter, incrementalUpdateEmitter, stateEmitter, options);
     mainWindow.webContents.send('sync:completed', result);
     return result;
   } catch (error) {
