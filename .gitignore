@@ -6,3 +6,14 @@ npm-debug.log*
 .env
 storage/
 .DS_Store
+test-results/
+.env.example
+.DS_Store
+EMAIL-TO-VANTA-TEAM.md
+quick-rate-limit-test.js
+QUICK-SUMMARY.md
+rate-limit-scenarios.js
+TEST-RATE-LIMITS-README.md
+test-rate-limits.js
+VANTA-RATE-LIMIT-REPORT.md
+.DS_Store
