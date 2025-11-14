@@ -43,7 +43,7 @@ describe('DataService - Sync Operations', () => {
     mockApiClientInstance = {
       getVulnerabilities: jest.fn(),
       getRemediations: jest.fn(),
-      getAssets: jest.fn().mockResolvedValue(undefined),
+      getVulnerableAssets: jest.fn().mockResolvedValue(undefined),
     };
 
     mockDatabaseInstance = {
@@ -162,7 +162,7 @@ describe('DataService - Sync Operations', () => {
 
       mockApiClientInstance.getVulnerabilities.mockImplementation(() => vulnerabilitiesPromise);
       mockApiClientInstance.getRemediations.mockImplementation(() => remediationsPromise);
-      mockApiClientInstance.getAssets.mockImplementation(() => assetsPromise);
+      mockApiClientInstance.getVulnerableAssets.mockImplementation(() => assetsPromise);
 
       const syncPromise = dataService.syncData();
 
@@ -182,7 +182,7 @@ describe('DataService - Sync Operations', () => {
 
       expect(mockApiClientInstance.getVulnerabilities).toHaveBeenCalled();
       expect(mockApiClientInstance.getRemediations).toHaveBeenCalled();
-      expect(mockApiClientInstance.getAssets).toHaveBeenCalled();
+      expect(mockApiClientInstance.getVulnerableAssets).toHaveBeenCalled();
     });
 
     it('should throw error if credentials are missing', async () => {
@@ -229,7 +229,7 @@ describe('DataService - Sync Operations', () => {
 
       mockApiClientInstance.getRemediations.mockImplementation(async () => {});
 
-      mockApiClientInstance.getAssets.mockImplementation(async ({ onBatch }) => {
+      mockApiClientInstance.getVulnerableAssets.mockImplementation(async ({ onBatch }) => {
         await onBatch([{ id: 'asset-1', displayName: 'Asset 1' }]);
         await onBatch([{ id: 'asset-2', displayName: 'Asset 2' }]);
       });
@@ -525,7 +525,7 @@ describe('DataService - Sync Operations', () => {
         expect(signal).toBeInstanceOf(AbortSignal);
       });
 
-      mockApiClientInstance.getAssets.mockImplementation(async ({ signal }) => {
+      mockApiClientInstance.getVulnerableAssets.mockImplementation(async ({ signal }) => {
         expect(signal).toBeDefined();
         expect(signal).toBeInstanceOf(AbortSignal);
       });
