@@ -362,7 +362,7 @@ class DataService {
           },
           signal: this.syncState.abortController.signal,
         }),
-        apiClient.getAssets({
+        apiClient.getVulnerableAssets({
           filters: {},
           onBatch: async (batch) => {
             await checkPauseOrStop();
