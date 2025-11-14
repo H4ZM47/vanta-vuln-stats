@@ -572,4 +572,109 @@ describe('DataService - Sync Operations', () => {
       await expect(syncPromise).rejects.toThrow();
     });
   });
+
+  describe('Data Access Methods - Vulnerable Assets', () => {
+    beforeEach(() => {
+      // Add mock methods for vulnerable assets to the database instance
+      mockDatabaseInstance.getVulnerableAssets = jest.fn(() => [
+        { id: 'asset-1', displayName: 'Asset 1', vulnerability_count: 5 },
+        { id: 'asset-2', displayName: 'Asset 2', vulnerability_count: 3 },
+      ]);
+      mockDatabaseInstance.getVulnerableAssetCount = jest.fn(() => 10);
+      mockDatabaseInstance.getVulnerableAssetDetails = jest.fn((id) => {
+        if (id === 'asset-1') {
+          return { id: 'asset-1', displayName: 'Asset 1', vulnerability_count: 5, raw_data: '{}' };
+        }
+        return null;
+      });
+      mockDatabaseInstance.getVulnerabilitiesForAsset = jest.fn((assetId) => {
+        if (assetId === 'asset-1') {
+          return [
+            { id: 'vuln-1', name: 'Vulnerability 1' },
+            { id: 'vuln-2', name: 'Vulnerability 2' },
+          ];
+        }
+        return [];
+      });
+    });
+
+    it('should call getVulnerableAssets with correct parameters and return data with total', () => {
+      const options = {
+        filters: { assetType: 'server' },
+        limit: 50,
+        offset: 10,
+        sortColumn: 'displayName',
+        sortDirection: 'asc',
+      };
+
+      const result = dataService.getVulnerableAssets(options);
+
+      expect(mockDatabaseInstance.getVulnerableAssets).toHaveBeenCalledWith({
+        filters: { assetType: 'server' },
+        limit: 50,
+        offset: 10,
+        sortColumn: 'displayName',
+        sortDirection: 'asc',
+      });
+      expect(mockDatabaseInstance.getVulnerableAssetCount).toHaveBeenCalledWith({ assetType: 'server' });
+      expect(result).toEqual({
+        data: [
+          { id: 'asset-1', displayName: 'Asset 1', vulnerability_count: 5 },
+          { id: 'asset-2', displayName: 'Asset 2', vulnerability_count: 3 },
+        ],
+        total: 10,
+      });
+    });
+
+    it('should use default parameters when none are provided to getVulnerableAssets', () => {
+      const result = dataService.getVulnerableAssets();
+
+      expect(mockDatabaseInstance.getVulnerableAssets).toHaveBeenCalledWith({
+        filters: {},
+        limit: 100,
+        offset: 0,
+        sortColumn: 'vulnerability_count',
+        sortDirection: 'desc',
+      });
+      expect(mockDatabaseInstance.getVulnerableAssetCount).toHaveBeenCalledWith({});
+      expect(result).toHaveProperty('data');
+      expect(result).toHaveProperty('total');
+    });
+
+    it('should call getVulnerableAssetDetails and return asset details', () => {
+      const result = dataService.getVulnerableAssetDetails('asset-1');
+
+      expect(mockDatabaseInstance.getVulnerableAssetDetails).toHaveBeenCalledWith('asset-1');
+      expect(result).toEqual({
+        id: 'asset-1',
+        displayName: 'Asset 1',
+        vulnerability_count: 5,
+        raw_data: '{}',
+      });
+    });
+
+    it('should return null when getVulnerableAssetDetails is called with non-existent id', () => {
+      const result = dataService.getVulnerableAssetDetails('non-existent');
+
+      expect(mockDatabaseInstance.getVulnerableAssetDetails).toHaveBeenCalledWith('non-existent');
+      expect(result).toBeNull();
+    });
+
+    it('should call getVulnerabilitiesForAsset and return vulnerabilities', () => {
+      const result = dataService.getVulnerabilitiesForAsset('asset-1');
+
+      expect(mockDatabaseInstance.getVulnerabilitiesForAsset).toHaveBeenCalledWith('asset-1');
+      expect(result).toEqual([
+        { id: 'vuln-1', name: 'Vulnerability 1' },
+        { id: 'vuln-2', name: 'Vulnerability 2' },
+      ]);
+    });
+
+    it('should return empty array when getVulnerabilitiesForAsset is called with asset that has no vulnerabilities', () => {
+      const result = dataService.getVulnerabilitiesForAsset('asset-2');
+
+      expect(mockDatabaseInstance.getVulnerabilitiesForAsset).toHaveBeenCalledWith('asset-2');
+      expect(result).toEqual([]);
+    });
+  });
 });
