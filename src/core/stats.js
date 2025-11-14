@@ -4,6 +4,49 @@ const toSortedArray = (counts) => {
     .sort((a, b) => b.value - a.value);
 };
 
+const formatAssetDistribution = (distribution, total) => {
+  return Object.entries(distribution)
+    .map(([type, count]) => ({
+      label: type || 'Unknown',
+      count,
+      percentage: total > 0 ? ((count / total) * 100).toFixed(1) + '%' : '0.0%',
+    }))
+    .sort((a, b) => b.count - a.count);
+};
+
+const formatTopAssets = (topAssets) => {
+  return topAssets.map((asset) => ({
+    id: asset.id,
+    name: asset.display_name || 'Unknown',
+    type: asset.asset_type || 'Unknown',
+    vulnerabilityCount: asset.vulnerability_count,
+    criticalCount: asset.critical_count,
+    highCount: asset.high_count,
+    mediumCount: asset.medium_count,
+    lowCount: asset.low_count,
+    criticalAndHigh: asset.critical_count + asset.high_count,
+    label: `${asset.display_name || 'Unknown'} (${asset.asset_type || 'Unknown'})`,
+  }));
+};
+
+const formatAssetMetrics = (assetStats) => {
+  if (!assetStats) {
+    return null;
+  }
+
+  return {
+    total: assetStats.total ?? 0,
+    byType: formatAssetDistribution(assetStats.byType ?? {}, assetStats.total ?? 0),
+    byIntegration: formatAssetDistribution(assetStats.byIntegration ?? {}, assetStats.total ?? 0),
+    topVulnerable: formatTopAssets(assetStats.topVulnerable ?? []),
+    averageVulnerabilitiesPerAsset: assetStats.averageVulnerabilitiesPerAsset
+      ? Number(assetStats.averageVulnerabilitiesPerAsset.toFixed(2))
+      : 0,
+    withCriticalVulnerabilities: assetStats.withCriticalVulnerabilities ?? 0,
+    withHighVulnerabilities: assetStats.withHighVulnerabilities ?? 0,
+  };
+};
+
 const formatStatistics = (stats) => {
   const remediationStats = stats.remediations;
 
@@ -52,6 +95,7 @@ const formatStatistics = (stats) => {
           },
         }
       : null,
+    assets: formatAssetMetrics(stats.assets),
   };
 };
 

@@ -1301,6 +1301,9 @@ class VulnerabilityDatabase {
     // Get remediation statistics
     const remediationStats = this._getRemediationStatistics(where, params);
 
+    // Get asset statistics from vulnerable_assets table
+    const assetStats = this._getAssetStatistics();
+
     return {
       totalCount: total,
       bySeverity,
@@ -1315,6 +1318,7 @@ class VulnerabilityDatabase {
       averageCvssBySeverity,
       lastSync: lastSync?.sync_date ?? null,
       remediations: remediationStats,
+      assets: assetStats,
     };
   }
 
@@ -1734,6 +1738,112 @@ class VulnerabilityDatabase {
     `);
 
     return stmt.all(assetId);
+  }
+
+  /**
+   * Get asset statistics from vulnerable_assets table.
+   *
+   * Returns comprehensive statistics about vulnerable assets including:
+   * - Total count of vulnerable assets
+   * - Distribution by asset type
+   * - Distribution by integration
+   * - Top 10 assets by vulnerability count
+   * - Average vulnerabilities per asset
+   * - Count of assets with critical/high vulnerabilities
+   *
+   * @private
+   * @returns {Object} Asset statistics object
+   */
+  _getAssetStatistics() {
+    // Total vulnerable assets count
+    const totalAssets = this.db.prepare(`
+      SELECT COUNT(*) as count
+      FROM vulnerable_assets
+    `).get()?.count ?? 0;
+
+    // If no assets, return empty stats
+    if (totalAssets === 0) {
+      return {
+        total: 0,
+        byType: {},
+        byIntegration: {},
+        topVulnerable: [],
+        averageVulnerabilitiesPerAsset: 0,
+        withCriticalVulnerabilities: 0,
+        withHighVulnerabilities: 0,
+      };
+    }
+
+    // Assets by type distribution
+    const assetsByType = this.db.prepare(`
+      SELECT asset_type, COUNT(*) as count
+      FROM vulnerable_assets
+      GROUP BY asset_type
+    `).all();
+
+    const byType = assetsByType.reduce((acc, row) => {
+      acc[row.asset_type || 'UNKNOWN'] = row.count;
+      return acc;
+    }, {});
+
+    // Assets by integration distribution
+    const assetsByIntegration = this.db.prepare(`
+      SELECT integration_id, COUNT(*) as count
+      FROM vulnerable_assets
+      GROUP BY integration_id
+    `).all();
+
+    const byIntegration = assetsByIntegration.reduce((acc, row) => {
+      acc[row.integration_id || 'UNKNOWN'] = row.count;
+      return acc;
+    }, {});
+
+    // Top 10 assets by vulnerability count
+    const topAssets = this.db.prepare(`
+      SELECT
+        id,
+        display_name,
+        asset_type,
+        vulnerability_count,
+        critical_count,
+        high_count,
+        medium_count,
+        low_count
+      FROM vulnerable_assets
+      ORDER BY vulnerability_count DESC, critical_count DESC, high_count DESC
+      LIMIT 10
+    `).all();
+
+    // Average vulnerabilities per asset
+    const avgResult = this.db.prepare(`
+      SELECT AVG(vulnerability_count) as average
+      FROM vulnerable_assets
+    `).get();
+    const averageVulnerabilitiesPerAsset = avgResult?.average ?? 0;
+
+    // Assets with critical vulnerabilities
+    const withCritical = this.db.prepare(`
+      SELECT COUNT(*) as count
+      FROM vulnerable_assets
+      WHERE critical_count > 0
+    `).get()?.count ?? 0;
+
+    // Assets with high vulnerabilities
+    const withHigh = this.db.prepare(`
+      SELECT COUNT(*) as count
+      FROM vulnerable_assets
+      WHERE high_count > 0
+    `).get()?.count ?? 0;
+
+    return {
+      total: totalAssets,
+      byType,
+      byIntegration,
+      topVulnerable: topAssets,
+      averageVulnerabilitiesPerAsset,
+      withCriticalVulnerabilities: withCritical,
+      withHighVulnerabilities: withHigh,
+    };
   }
 
   _getRemediationStatistics(where, params) {

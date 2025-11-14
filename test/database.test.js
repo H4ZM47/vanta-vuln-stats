@@ -1389,3 +1389,227 @@ test('asset-vulnerability referential integrity is maintained', () => {
     cleanupDb(db);
   }
 });
+
+// ============================================================================
+// Asset Statistics Tests
+// ============================================================================
+
+test('getStatistics returns asset statistics when vulnerable assets exist', () => {
+  const db = createTempDb();
+
+  try {
+    // Store vulnerable assets with different types and integrations
+    const assets = [
+      {
+        id: 'stats-asset-1',
+        name: 'server-1',
+        assetType: 'SERVER',
+        integrationId: 'qualys',
+        vulnerabilityCounts: { total: 50, critical: 10, high: 20, medium: 15, low: 5 },
+      },
+      {
+        id: 'stats-asset-2',
+        name: 'server-2',
+        assetType: 'SERVER',
+        integrationId: 'tenable',
+        vulnerabilityCounts: { total: 30, critical: 5, high: 10, medium: 10, low: 5 },
+      },
+      {
+        id: 'stats-asset-3',
+        name: 'workstation-1',
+        assetType: 'WORKSTATION',
+        integrationId: 'qualys',
+        vulnerabilityCounts: { total: 10, critical: 2, high: 3, medium: 3, low: 2 },
+      },
+      {
+        id: 'stats-asset-4',
+        name: 'container-1',
+        assetType: 'CONTAINER',
+        integrationId: 'snyk',
+        vulnerabilityCounts: { total: 5, critical: 0, high: 2, medium: 2, low: 1 },
+      },
+    ];
+
+    db.storeVulnerableAssetsBatch(assets);
+
+    const stats = db.getStatistics();
+
+    // Verify asset statistics exist
+    assert.ok(stats.assets, 'Should have asset statistics');
+    assert.equal(stats.assets.total, 4, 'Should have 4 total assets');
+
+    // Verify byType distribution
+    assert.ok(stats.assets.byType, 'Should have byType distribution');
+    assert.equal(stats.assets.byType.SERVER, 2, 'Should have 2 SERVER assets');
+    assert.equal(stats.assets.byType.WORKSTATION, 1, 'Should have 1 WORKSTATION asset');
+    assert.equal(stats.assets.byType.CONTAINER, 1, 'Should have 1 CONTAINER asset');
+
+    // Verify byIntegration distribution
+    assert.ok(stats.assets.byIntegration, 'Should have byIntegration distribution');
+    assert.equal(stats.assets.byIntegration.qualys, 2, 'Should have 2 qualys assets');
+    assert.equal(stats.assets.byIntegration.tenable, 1, 'Should have 1 tenable asset');
+    assert.equal(stats.assets.byIntegration.snyk, 1, 'Should have 1 snyk asset');
+
+    // Verify topVulnerable
+    assert.ok(Array.isArray(stats.assets.topVulnerable), 'topVulnerable should be an array');
+    assert.equal(stats.assets.topVulnerable.length, 4, 'Should have 4 assets in topVulnerable');
+    assert.equal(stats.assets.topVulnerable[0].id, 'stats-asset-1', 'First asset should be the one with most vulnerabilities');
+    assert.equal(stats.assets.topVulnerable[0].vulnerability_count, 50, 'First asset should have 50 vulnerabilities');
+
+    // Verify average vulnerabilities per asset
+    const expectedAverage = (50 + 30 + 10 + 5) / 4; // 23.75
+    assert.ok(Math.abs(stats.assets.averageVulnerabilitiesPerAsset - expectedAverage) < 0.01,
+      'Average should be approximately 23.75');
+
+    // Verify critical and high counts
+    assert.equal(stats.assets.withCriticalVulnerabilities, 3, 'Should have 3 assets with critical vulnerabilities');
+    assert.equal(stats.assets.withHighVulnerabilities, 4, 'Should have 4 assets with high vulnerabilities');
+  } finally {
+    cleanupDb(db);
+  }
+});
+
+test('getStatistics returns empty asset statistics when no vulnerable assets exist', () => {
+  const db = createTempDb();
+
+  try {
+    const stats = db.getStatistics();
+
+    assert.ok(stats.assets, 'Should have asset statistics object');
+    assert.equal(stats.assets.total, 0, 'Should have 0 total assets');
+    assert.deepEqual(stats.assets.byType, {}, 'byType should be empty object');
+    assert.deepEqual(stats.assets.byIntegration, {}, 'byIntegration should be empty object');
+    assert.deepEqual(stats.assets.topVulnerable, [], 'topVulnerable should be empty array');
+    assert.equal(stats.assets.averageVulnerabilitiesPerAsset, 0, 'Average should be 0');
+    assert.equal(stats.assets.withCriticalVulnerabilities, 0, 'Should have 0 assets with critical');
+    assert.equal(stats.assets.withHighVulnerabilities, 0, 'Should have 0 assets with high');
+  } finally {
+    cleanupDb(db);
+  }
+});
+
+test('getStatistics topVulnerable is limited to 10 assets', () => {
+  const db = createTempDb();
+
+  try {
+    // Create 15 assets
+    const assets = Array.from({ length: 15 }, (_, i) => ({
+      id: `top-asset-${i}`,
+      name: `asset-${i}`,
+      assetType: 'SERVER',
+      vulnerabilityCounts: { total: 100 - i, critical: 10, high: 20, medium: 30, low: 40 },
+    }));
+
+    db.storeVulnerableAssetsBatch(assets);
+
+    const stats = db.getStatistics();
+
+    assert.equal(stats.assets.topVulnerable.length, 10, 'Should only return top 10 assets');
+    assert.equal(stats.assets.topVulnerable[0].id, 'top-asset-0', 'First should have most vulnerabilities');
+    assert.equal(stats.assets.topVulnerable[9].id, 'top-asset-9', 'Last should be 10th asset');
+  } finally {
+    cleanupDb(db);
+  }
+});
+
+test('getStatistics topVulnerable sorts by vulnerability count, then by critical and high', () => {
+  const db = createTempDb();
+
+  try {
+    const assets = [
+      {
+        id: 'sort-asset-1',
+        name: 'same-count-more-critical',
+        vulnerabilityCounts: { total: 10, critical: 5, high: 3, medium: 2, low: 0 },
+      },
+      {
+        id: 'sort-asset-2',
+        name: 'same-count-less-critical',
+        vulnerabilityCounts: { total: 10, critical: 2, high: 5, medium: 3, low: 0 },
+      },
+      {
+        id: 'sort-asset-3',
+        name: 'more-vulns',
+        vulnerabilityCounts: { total: 20, critical: 1, high: 1, medium: 18, low: 0 },
+      },
+    ];
+
+    db.storeVulnerableAssetsBatch(assets);
+
+    const stats = db.getStatistics();
+
+    // Should be sorted: more-vulns (20), same-count-more-critical (10, 5C), same-count-less-critical (10, 2C)
+    assert.equal(stats.assets.topVulnerable[0].id, 'sort-asset-3', 'First should be asset with most vulnerabilities');
+    assert.equal(stats.assets.topVulnerable[1].id, 'sort-asset-1', 'Second should be asset with more critical');
+    assert.equal(stats.assets.topVulnerable[2].id, 'sort-asset-2', 'Third should be asset with fewer critical');
+  } finally {
+    cleanupDb(db);
+  }
+});
+
+test('getStatistics handles assets with zero vulnerabilities', () => {
+  const db = createTempDb();
+
+  try {
+    const assets = [
+      {
+        id: 'zero-vuln-1',
+        name: 'no-vulns',
+        vulnerabilityCounts: { total: 0, critical: 0, high: 0, medium: 0, low: 0 },
+      },
+      {
+        id: 'has-vulns-1',
+        name: 'has-vulns',
+        vulnerabilityCounts: { total: 5, critical: 1, high: 2, medium: 2, low: 0 },
+      },
+    ];
+
+    db.storeVulnerableAssetsBatch(assets);
+
+    const stats = db.getStatistics();
+
+    assert.equal(stats.assets.total, 2, 'Should count both assets');
+    assert.equal(stats.assets.averageVulnerabilitiesPerAsset, 2.5, 'Average should include zero-vuln assets');
+    assert.equal(stats.assets.withCriticalVulnerabilities, 1, 'Should only count asset with critical > 0');
+    assert.equal(stats.assets.withHighVulnerabilities, 1, 'Should only count asset with high > 0');
+  } finally {
+    cleanupDb(db);
+  }
+});
+
+test('getStatistics handles assets with null/unknown types and integrations', () => {
+  const db = createTempDb();
+
+  try {
+    const assets = [
+      {
+        id: 'null-type-1',
+        name: 'null-type',
+        assetType: null,
+        integrationId: null,
+        vulnerabilityCounts: { total: 5, critical: 1, high: 2, medium: 2, low: 0 },
+      },
+      {
+        id: 'known-type-1',
+        name: 'known-type',
+        assetType: 'SERVER',
+        integrationId: 'qualys',
+        vulnerabilityCounts: { total: 10, critical: 2, high: 3, medium: 5, low: 0 },
+      },
+    ];
+
+    db.storeVulnerableAssetsBatch(assets);
+
+    const stats = db.getStatistics();
+
+    assert.ok(stats.assets.byType.UNKNOWN, 'Should have UNKNOWN type category');
+    assert.equal(stats.assets.byType.UNKNOWN, 1, 'Should count null type as UNKNOWN');
+    assert.equal(stats.assets.byType.SERVER, 1, 'Should count known type');
+
+    assert.ok(stats.assets.byIntegration.UNKNOWN, 'Should have UNKNOWN integration category');
+    assert.equal(stats.assets.byIntegration.UNKNOWN, 1, 'Should count null integration as UNKNOWN');
+    assert.equal(stats.assets.byIntegration.qualys, 1, 'Should count known integration');
+  } finally {
+    cleanupDb(db);
+  }
+});
