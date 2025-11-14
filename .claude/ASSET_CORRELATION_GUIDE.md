@@ -73,9 +73,20 @@ ORDER BY vulnerabilityCount DESC, assetName ASC
 
 ## API Integration
 
+### Endpoint Migration Notice
+
+**IMPORTANT:** The application now uses the `/vulnerable-assets` endpoint instead of the deprecated `/assets` endpoint. The `/assets` endpoint was returning 404 errors and has been replaced by Vanta with the `/vulnerable-assets` endpoint, which provides:
+- The same asset data with improved structure
+- Richer scanner metadata via the `scanners[]` array
+- Better support for asset correlation and filtering
+- Full backward compatibility with existing data
+
+All asset-related API calls in this application automatically use the correct `/vulnerable-assets` endpoint.
+
 ### Fetch Vulnerable Assets
 
 ```javascript
+// Uses /vulnerable-assets endpoint (correct)
 const assets = await apiClient.getVulnerableAssets({
   pageSize: 100,
   filters: {
@@ -94,6 +105,7 @@ const assets = await apiClient.getVulnerableAssets({
 ### Fetch Single Asset
 
 ```javascript
+// Uses /vulnerable-assets/{id} endpoint (correct)
 const asset = await apiClient.getVulnerableAsset('asset-id-123');
 console.log(asset.name);          // "production-server-01"
 console.log(asset.assetType);     // "SERVER"
@@ -203,6 +215,24 @@ const typeLabel = asset.assetType
    - 1000 items per database transaction
    - Balances memory and performance
 
+## Known Limitations
+
+### API Endpoint Compatibility
+
+**Deprecated /assets endpoint:** The original `/assets` endpoint is no longer available and returns 404 errors. This application has been updated to use the correct `/vulnerable-assets` endpoint.
+
+**Impact:** Users on older versions (< 1.1.0) will experience sync failures when attempting to fetch asset data. Update to version 1.1.0 or later to resolve this issue.
+
+**Data compatibility:** Asset data synced from the deprecated `/assets` endpoint is fully compatible with data from the `/vulnerable-assets` endpoint. No data migration is required when upgrading.
+
+### Scanner Metadata Availability
+
+Some asset fields depend on scanner metadata which may not be present for all asset types:
+- **Operating system information:** Only available for SERVER and WORKSTATION assets
+- **Network details (IPs, hostnames):** Only available for network-connected assets
+- **Image metadata:** Only available for CONTAINER_REPOSITORY_IMAGE assets
+- **Environment tags:** May not be present if not configured in the scanner
+
 ## Troubleshooting
 
 ### Asset Names Not Showing
@@ -212,8 +242,9 @@ const typeLabel = asset.assetType
 **Solutions:**
 1. Run a sync to fetch asset data
 2. Check sync logs for asset fetch errors
-3. Verify API credentials have access to `/vulnerable-assets`
+3. Verify API credentials have access to `/vulnerable-assets` endpoint
 4. Check for API rate limiting
+5. Ensure you're running version 1.1.0 or later (older versions use deprecated `/assets` endpoint)
 
 ### Missing Asset Types
 

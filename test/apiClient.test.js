@@ -384,3 +384,270 @@ test('VantaApiClient getRemediations calls paginate with correct endpoint', asyn
 
   resetAxiosMocks();
 });
+
+test('VantaApiClient getVulnerableAssets calls paginate with correct endpoint', async () => {
+  let capturedConfig = null;
+  const mockAxiosInstance = {
+    request: async (config) => {
+      capturedConfig = config;
+      return {
+        data: {
+          results: {
+            data: [{ id: 'asset-1', name: 'test-server' }],
+            pageInfo: { hasNextPage: false },
+          },
+        },
+      };
+    },
+    defaults: {
+      headers: { common: {} },
+    },
+  };
+
+  axios.create = () => mockAxiosInstance;
+  axios.post = async () => ({
+    data: { access_token: 'test-token', expires_in: 3600 },
+  });
+
+  const apiClient = new VantaApiClient({
+    clientId: 'test-id',
+    clientSecret: 'test-secret',
+  });
+
+  const results = await apiClient.getVulnerableAssets();
+
+  assert.equal(capturedConfig.url, '/vulnerable-assets');
+  assert.equal(results.length, 1);
+  assert.equal(results[0].id, 'asset-1');
+
+  resetAxiosMocks();
+});
+
+test('VantaApiClient getVulnerableAssets passes filters correctly', async () => {
+  let capturedConfig = null;
+  const mockAxiosInstance = {
+    request: async (config) => {
+      capturedConfig = config;
+      return {
+        data: {
+          results: {
+            data: [{ id: 'asset-1' }],
+            pageInfo: { hasNextPage: false },
+          },
+        },
+      };
+    },
+    defaults: {
+      headers: { common: {} },
+    },
+  };
+
+  axios.create = () => mockAxiosInstance;
+  axios.post = async () => ({
+    data: { access_token: 'test-token', expires_in: 3600 },
+  });
+
+  const apiClient = new VantaApiClient({
+    clientId: 'test-id',
+    clientSecret: 'test-secret',
+  });
+
+  await apiClient.getVulnerableAssets({
+    filters: {
+      assetType: 'SERVER',
+      integrationId: 'qualys',
+      q: 'production',
+    },
+  });
+
+  assert.equal(capturedConfig.params.assetType, 'SERVER');
+  assert.equal(capturedConfig.params.integrationId, 'qualys');
+  assert.equal(capturedConfig.params.q, 'production');
+
+  resetAxiosMocks();
+});
+
+test('VantaApiClient getVulnerableAssets handles multi-page responses', async () => {
+  let pageCount = 0;
+  const mockAxiosInstance = {
+    request: async (config) => {
+      pageCount++;
+      if (pageCount === 1) {
+        return {
+          data: {
+            results: {
+              data: [{ id: 'asset-1' }, { id: 'asset-2' }],
+              pageInfo: {
+                hasNextPage: true,
+                endCursor: 'cursor1',
+              },
+            },
+          },
+        };
+      } else {
+        return {
+          data: {
+            results: {
+              data: [{ id: 'asset-3' }],
+              pageInfo: {
+                hasNextPage: false,
+              },
+            },
+          },
+        };
+      }
+    },
+    defaults: {
+      headers: { common: {} },
+    },
+  };
+
+  axios.create = () => mockAxiosInstance;
+  axios.post = async () => ({
+    data: { access_token: 'test-token', expires_in: 3600 },
+  });
+
+  const apiClient = new VantaApiClient({
+    clientId: 'test-id',
+    clientSecret: 'test-secret',
+  });
+
+  const results = await apiClient.getVulnerableAssets();
+
+  assert.equal(results.length, 3);
+  assert.equal(results[0].id, 'asset-1');
+  assert.equal(results[1].id, 'asset-2');
+  assert.equal(results[2].id, 'asset-3');
+  assert.equal(pageCount, 2);
+
+  resetAxiosMocks();
+});
+
+test('VantaApiClient getVulnerableAssets calls onBatch callback', async () => {
+  let pageCount = 0;
+  const mockAxiosInstance = {
+    request: async (config) => {
+      pageCount++;
+      return {
+        data: {
+          results: {
+            data: pageCount === 1 ? [{ id: 'asset-1' }] : [{ id: 'asset-2' }],
+            pageInfo: {
+              hasNextPage: pageCount < 2,
+              endCursor: pageCount < 2 ? 'cursor1' : undefined,
+            },
+          },
+        },
+      };
+    },
+    defaults: {
+      headers: { common: {} },
+    },
+  };
+
+  axios.create = () => mockAxiosInstance;
+  axios.post = async () => ({
+    data: { access_token: 'test-token', expires_in: 3600 },
+  });
+
+  const apiClient = new VantaApiClient({
+    clientId: 'test-id',
+    clientSecret: 'test-secret',
+  });
+
+  const batches = [];
+  await apiClient.getVulnerableAssets({
+    onBatch: async (batch) => batches.push(batch),
+  });
+
+  assert.equal(batches.length, 2);
+  assert.deepEqual(batches[0], [{ id: 'asset-1' }]);
+  assert.deepEqual(batches[1], [{ id: 'asset-2' }]);
+
+  resetAxiosMocks();
+});
+
+test('VantaApiClient getVulnerableAssets respects AbortController signal', async () => {
+  const mockAxiosInstance = {
+    request: async (config) => {
+      // Simulate the request being aborted
+      const error = new Error('Request aborted');
+      error.name = 'AbortError';
+      error.code = 'ERR_CANCELED';
+      throw error;
+    },
+    defaults: {
+      headers: { common: {} },
+    },
+  };
+
+  axios.create = () => mockAxiosInstance;
+  axios.post = async () => ({
+    data: { access_token: 'test-token', expires_in: 3600 },
+  });
+
+  const apiClient = new VantaApiClient({
+    clientId: 'test-id',
+    clientSecret: 'test-secret',
+  });
+
+  const abortController = new AbortController();
+  abortController.abort();
+
+  let caughtError = null;
+  try {
+    await apiClient.getVulnerableAssets({ signal: abortController.signal });
+  } catch (error) {
+    caughtError = error;
+  }
+
+  assert.ok(caughtError, 'Should have thrown an error');
+  // The error might be wrapped, so check the error or its cause
+  const isAbortError =
+    caughtError.name === 'AbortError' ||
+    caughtError.code === 'ERR_CANCELED' ||
+    caughtError.cause?.name === 'AbortError' ||
+    caughtError.cause?.code === 'ERR_CANCELED';
+  assert.ok(isAbortError, `Expected abort error, got: ${caughtError.message}`);
+
+  resetAxiosMocks();
+});
+
+test('VantaApiClient getVulnerableAsset fetches single asset by ID', async () => {
+  let capturedConfig = null;
+  const mockAxiosInstance = {
+    request: async (config) => {
+      capturedConfig = config;
+      return {
+        data: {
+          id: 'asset-123',
+          name: 'production-server',
+          assetType: 'SERVER',
+        },
+      };
+    },
+    defaults: {
+      headers: { common: {} },
+    },
+  };
+
+  axios.create = () => mockAxiosInstance;
+  axios.post = async () => ({
+    data: { access_token: 'test-token', expires_in: 3600 },
+  });
+
+  const apiClient = new VantaApiClient({
+    clientId: 'test-id',
+    clientSecret: 'test-secret',
+  });
+
+  const asset = await apiClient.getVulnerableAsset('asset-123');
+
+  assert.equal(capturedConfig.url, '/vulnerable-assets/asset-123');
+  assert.equal(capturedConfig.method, 'get');
+  assert.equal(asset.id, 'asset-123');
+  assert.equal(asset.name, 'production-server');
+  assert.equal(asset.assetType, 'SERVER');
+
+  resetAxiosMocks();
+});

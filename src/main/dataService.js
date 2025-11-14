@@ -274,7 +274,7 @@ class DataService {
           return;
         }
         try {
-          const stats = this.database.storeAssetsBatch(assets);
+          const stats = this.database.storeVulnerableAssetsBatch(assets);
           assetsStats.new += stats.new;
           assetsStats.updated += stats.updated;
           assetsStats.total += stats.total;
@@ -362,6 +362,11 @@ class DataService {
           },
           signal: this.syncState.abortController.signal,
         }),
+        // Fetch vulnerable assets using the /vulnerable-assets endpoint
+        // IMPORTANT: This uses the correct /vulnerable-assets endpoint, which replaced
+        // the deprecated /assets endpoint that returned 404 errors. The /vulnerable-assets
+        // endpoint provides richer asset metadata including scanner details, network info,
+        // and asset tags that enable better asset correlation and display in the UI.
         apiClient.getVulnerableAssets({
           filters: {},
           onBatch: async (batch) => {
