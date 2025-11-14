@@ -6,9 +6,11 @@ The app replaces the legacy Python CLI/Qt tooling with a modern JavaScript stack
 
 ## Features
 
-- **One-click data sync** – authenticate with a Vanta API client (client credentials flow) and fetch the complete vulnerability and remediation datasets with rate limiting safeguards and automatic retries.
+- **One-click data sync** – authenticate with a Vanta API client (client credentials flow) and fetch the complete vulnerability, remediation, and asset datasets with rate limiting safeguards and automatic retries.
+- **Asset correlation** – automatically correlates vulnerability data with asset information from the Vanta API, displaying human-readable asset names, types, and metadata instead of just IDs.
 - **Local SQLite cache** – data is saved in `better-sqlite3`, preserving raw payloads while surfacing the most relevant metadata for filtering and statistics.
 - **Rich dashboard** – interactive metrics for totals, severity distribution, integration coverage, fixability, asset and CVE uniqueness, and CVSS averages.
+- **Three-view explorer** – analyze vulnerabilities by list view, by asset, or by CVE. Asset view shows asset names and types with enhanced search across multiple fields.
 - **Vulnerability explorer** – filter by severity, status, fixability, integration, asset ID, CVE/name, and discovery/remediation date ranges. Paginated results keep navigation fast even for large datasets.
 - **Detail inspection** – view the full JSON payload for any vulnerability alongside its remediation history for audit or debugging purposes.
 - **Asset correlation** – automatically sync asset metadata from the Vanta Assets API so explorer views show friendly asset names, owners, environments, and last-seen timestamps alongside raw IDs.

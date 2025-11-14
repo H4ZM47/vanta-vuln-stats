@@ -259,6 +259,7 @@ class VulnerabilityDatabase {
     this.db.exec('CREATE INDEX IF NOT EXISTS idx_remediations_vulnerability ON vulnerability_remediations(vulnerability_id);');
     this.db.exec('CREATE INDEX IF NOT EXISTS idx_assets_integration ON assets(integration_id);');
     this.db.exec('CREATE INDEX IF NOT EXISTS idx_assets_type ON assets(asset_type);');
+    this.db.exec('CREATE INDEX IF NOT EXISTS idx_assets_name ON assets(name);');
   }
 
   _migrateSyncHistoryColumns() {
