@@ -600,8 +600,8 @@ const renderVulnerabilities = () => {
       const severityClass = item.severity ? `severity-chip ${item.severity}` : '';
       const isSelected = state.selectedId === item.id ? 'selected' : '';
       const assetDisplay = item.asset_name
-        ? `<div>${escapeHtml(item.asset_name)}</div><span class="table-subtext">${escapeHtml(item.target_id || '—')}</span>`
-        : escapeHtml(item.target_id || '—');
+        ? `<div><a href="#" class="asset-link" data-asset-id="${escapeHtml(item.target_id)}" style="color: #60a5fa; text-decoration: none;">${escapeHtml(item.asset_name)}</a></div><span class="table-subtext">${escapeHtml(item.target_id || '—')}</span>`
+        : (item.target_id ? `<a href="#" class="asset-link" data-asset-id="${escapeHtml(item.target_id)}" style="color: #60a5fa; text-decoration: none;">${escapeHtml(item.target_id)}</a>` : '—');
       const externalUrlDisplay = item.external_url
         ? `<a href="${escapeHtml(item.external_url)}" target="_blank" rel="noopener noreferrer">View</a>`
         : '—';
@@ -1891,6 +1891,27 @@ const attachEventListeners = () => {
   });
 
   elements.vulnerabilityTable.addEventListener('click', handleTableClick);
+
+  // Add event delegation for asset links in vulnerability table
+  elements.vulnerabilityTable.addEventListener('click', async (event) => {
+    const assetLink = event.target.closest('a.asset-link');
+    if (!assetLink) return;
+
+    event.preventDefault();
+    const assetId = assetLink.getAttribute('data-asset-id');
+    if (!assetId) return;
+
+    // Switch to the by-asset explorer tab
+    switchExplorerTab('by-asset');
+
+    // Load assets if not already loaded
+    if (!state.assets.length) {
+      await loadAssets();
+    }
+
+    // Select the asset
+    await selectAsset(assetId);
+  });
 
   // Attach column sort handlers
   document.querySelectorAll('.data-table thead th.sortable').forEach((th) => {

@@ -1165,6 +1165,43 @@ class VulnerabilityDatabase {
       params.dateRemediatedEnd = filters.dateRemediatedEnd;
     }
 
+    // Asset-based filters using EXISTS subqueries with vulnerable_assets and assets tables
+    if (filters.assetName) {
+      clauses.push(`EXISTS (
+        SELECT 1 FROM vulnerable_assets va
+        WHERE va.id = ${column('target_id')}
+        AND va.display_name LIKE @assetName
+      )`);
+      params.assetName = `%${filters.assetName}%`;
+    }
+
+    if (filters.assetOwner) {
+      clauses.push(`EXISTS (
+        SELECT 1 FROM assets a
+        WHERE a.id = ${column('target_id')}
+        AND (a.primary_owner LIKE @assetOwner OR a.owners LIKE @assetOwner)
+      )`);
+      params.assetOwner = `%${filters.assetOwner}%`;
+    }
+
+    if (filters.assetDomain) {
+      // Extract domain from asset metadata or external_identifier
+      // This searches in both vulnerable_assets and assets tables
+      clauses.push(`(
+        EXISTS (
+          SELECT 1 FROM vulnerable_assets va
+          WHERE va.id = ${column('target_id')}
+          AND (va.display_name LIKE @assetDomain OR va.metadata LIKE @assetDomain)
+        )
+        OR EXISTS (
+          SELECT 1 FROM assets a
+          WHERE a.id = ${column('target_id')}
+          AND (a.external_identifier LIKE @assetDomain OR a.tags LIKE @assetDomain)
+        )
+      )`);
+      params.assetDomain = `%${filters.assetDomain}%`;
+    }
+
     const where = clauses.length ? `WHERE ${clauses.join(' AND ')}` : '';
     return { where, params };
   }
@@ -1341,8 +1378,20 @@ class VulnerabilityDatabase {
     // Get remediation statistics
     const remediationStats = this._getRemediationStatistics(where, params);
 
-    // Get asset statistics from vulnerable_assets table
-    const assetStats = this._getAssetStatistics();
+    // Extract only asset-specific filters (exclude vulnerability filters like search, severity, etc.)
+    const assetFilters = {
+      assetType: filters.assetType,
+      integrationId: filters.integrationId,
+      minVulnerabilityCount: filters.minVulnerabilityCount,
+      maxVulnerabilityCount: filters.maxVulnerabilityCount,
+      firstDetectedStart: filters.firstDetectedStart,
+      firstDetectedEnd: filters.firstDetectedEnd,
+      lastDetectedStart: filters.lastDetectedStart,
+      lastDetectedEnd: filters.lastDetectedEnd,
+    };
+
+    // Get asset statistics from vulnerable_assets table with asset-specific filters applied
+    const assetStats = this._getAssetStatistics(assetFilters);
 
     // Get vulnerable assets count from the vulnerable_assets table (for backward compatibility)
     const vulnerableAssetsCount = this.db.prepare(
@@ -1568,6 +1617,10 @@ class VulnerabilityDatabase {
    * @param {number} [filters.minVulnerabilityCount] - Minimum vulnerability count
    * @param {number} [filters.maxVulnerabilityCount] - Maximum vulnerability count
    * @param {string} [filters.search] - Search in display name
+   * @param {string} [filters.firstDetectedStart] - Filter by first detected date (start range)
+   * @param {string} [filters.firstDetectedEnd] - Filter by first detected date (end range)
+   * @param {string} [filters.lastDetectedStart] - Filter by last detected date (start range)
+   * @param {string} [filters.lastDetectedEnd] - Filter by last detected date (end range)
    * @returns {Object} Object with where clause and params
    */
   _buildVulnerableAssetFilters(filters = {}) {
@@ -1597,6 +1650,26 @@ class VulnerabilityDatabase {
     if (filters.search) {
       clauses.push('(va.display_name LIKE @search OR va.id LIKE @search)');
       params.search = `%${filters.search}%`;
+    }
+
+    if (filters.firstDetectedStart) {
+      clauses.push('va.first_detected >= @firstDetectedStart');
+      params.firstDetectedStart = filters.firstDetectedStart;
+    }
+
+    if (filters.firstDetectedEnd) {
+      clauses.push('va.first_detected <= @firstDetectedEnd');
+      params.firstDetectedEnd = filters.firstDetectedEnd;
+    }
+
+    if (filters.lastDetectedStart) {
+      clauses.push('va.last_detected >= @lastDetectedStart');
+      params.lastDetectedStart = filters.lastDetectedStart;
+    }
+
+    if (filters.lastDetectedEnd) {
+      clauses.push('va.last_detected <= @lastDetectedEnd');
+      params.lastDetectedEnd = filters.lastDetectedEnd;
     }
 
     const where = clauses.length ? `WHERE ${clauses.join(' AND ')}` : '';
@@ -1797,15 +1870,34 @@ class VulnerabilityDatabase {
    * - Average vulnerabilities per asset
    * - Count of assets with critical/high vulnerabilities
    *
+   * Supports filtering by:
+   * - Asset type
+   * - Integration ID
+   * - Vulnerability count range
+   * - Date range (first_detected, last_detected)
+   *
    * @private
+   * @param {Object} [filters={}] - Filter options for asset statistics
+   * @param {string} [filters.assetType] - Filter by asset type
+   * @param {string} [filters.integrationId] - Filter by integration ID
+   * @param {number} [filters.minVulnerabilityCount] - Minimum vulnerability count
+   * @param {number} [filters.maxVulnerabilityCount] - Maximum vulnerability count
+   * @param {string} [filters.firstDetectedStart] - Filter by first detected date (start)
+   * @param {string} [filters.firstDetectedEnd] - Filter by first detected date (end)
+   * @param {string} [filters.lastDetectedStart] - Filter by last detected date (start)
+   * @param {string} [filters.lastDetectedEnd] - Filter by last detected date (end)
    * @returns {Object} Asset statistics object
    */
-  _getAssetStatistics() {
+  _getAssetStatistics(filters = {}) {
+    // Build WHERE clause and parameters from filters
+    const { where, params } = this._buildVulnerableAssetFilters(filters);
+
     // Total vulnerable assets count
     const totalAssets = this.db.prepare(`
       SELECT COUNT(*) as count
-      FROM vulnerable_assets
-    `).get()?.count ?? 0;
+      FROM vulnerable_assets va
+      ${where}
+    `).get(params)?.count ?? 0;
 
     // If no assets, return empty stats
     if (totalAssets === 0) {
@@ -1823,9 +1915,10 @@ class VulnerabilityDatabase {
     // Assets by type distribution
     const assetsByType = this.db.prepare(`
       SELECT asset_type, COUNT(*) as count
-      FROM vulnerable_assets
+      FROM vulnerable_assets va
+      ${where}
       GROUP BY asset_type
-    `).all();
+    `).all(params);
 
     const byType = assetsByType.reduce((acc, row) => {
       acc[row.asset_type || 'UNKNOWN'] = row.count;
@@ -1835,9 +1928,10 @@ class VulnerabilityDatabase {
     // Assets by integration distribution
     const assetsByIntegration = this.db.prepare(`
       SELECT integration_id, COUNT(*) as count
-      FROM vulnerable_assets
+      FROM vulnerable_assets va
+      ${where}
       GROUP BY integration_id
-    `).all();
+    `).all(params);
 
     const byIntegration = assetsByIntegration.reduce((acc, row) => {
       acc[row.integration_id || 'UNKNOWN'] = row.count;
@@ -1855,31 +1949,35 @@ class VulnerabilityDatabase {
         high_count,
         medium_count,
         low_count
-      FROM vulnerable_assets
+      FROM vulnerable_assets va
+      ${where}
       ORDER BY vulnerability_count DESC, critical_count DESC, high_count DESC
       LIMIT 10
-    `).all();
+    `).all(params);
 
     // Average vulnerabilities per asset
     const avgResult = this.db.prepare(`
       SELECT AVG(vulnerability_count) as average
-      FROM vulnerable_assets
-    `).get();
+      FROM vulnerable_assets va
+      ${where}
+    `).get(params);
     const averageVulnerabilitiesPerAsset = avgResult?.average ?? 0;
 
     // Assets with critical vulnerabilities
+    const criticalWhere = where ? `${where} AND va.critical_count > 0` : 'WHERE va.critical_count > 0';
     const withCritical = this.db.prepare(`
       SELECT COUNT(*) as count
-      FROM vulnerable_assets
-      WHERE critical_count > 0
-    `).get()?.count ?? 0;
+      FROM vulnerable_assets va
+      ${criticalWhere}
+    `).get(params)?.count ?? 0;
 
     // Assets with high vulnerabilities
+    const highWhere = where ? `${where} AND va.high_count > 0` : 'WHERE va.high_count > 0';
     const withHigh = this.db.prepare(`
       SELECT COUNT(*) as count
-      FROM vulnerable_assets
-      WHERE high_count > 0
-    `).get()?.count ?? 0;
+      FROM vulnerable_assets va
+      ${highWhere}
+    `).get(params)?.count ?? 0;
 
     return {
       total: totalAssets,
