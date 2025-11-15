@@ -1301,7 +1301,7 @@ class VulnerabilityDatabase {
     // Get remediation statistics
     const remediationStats = this._getRemediationStatistics(where, params);
 
-    // Get vulnerable assets count
+    // Get vulnerable assets count from the vulnerable_assets table
     const vulnerableAssetsCount = this.db.prepare(
       'SELECT COUNT(*) as count FROM vulnerable_assets'
     ).get()?.count ?? 0;
