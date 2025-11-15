@@ -1,4 +1,5 @@
 const axios = require('axios');
+const { VantaRateLimiters } = require('./rateLimiter');
 
 const BASE_URL = 'https://api.vanta.com/v1';
 const AUTH_URL = 'https://api.vanta.com/oauth/token';
@@ -7,7 +8,7 @@ const MAX_PAGE_SIZE = 100;
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 class VantaApiClient {
-  constructor({ clientId, clientSecret }) {
+  constructor({ clientId, clientSecret, rateLimitSafetyMargin = 0.85 }) {
     this.clientId = clientId;
     this.clientSecret = clientSecret;
     this.accessToken = null;
@@ -16,6 +17,11 @@ class VantaApiClient {
     this.http = axios.create({
       baseURL: BASE_URL,
       timeout: 120000,
+    });
+
+    // Initialize rate limiters for proactive rate limit prevention
+    this.rateLimiters = new VantaRateLimiters({
+      safetyMargin: rateLimitSafetyMargin
     });
   }
 
@@ -70,6 +76,10 @@ class VantaApiClient {
     let lastError;
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
       try {
+        // Acquire rate limiter token before making OAuth request
+        // This prevents hitting the 5 req/min OAuth endpoint limit
+        await this.rateLimiters.oauth.acquire();
+
         const response = await axios.post(AUTH_URL, payload, {
           headers: { 'Content-Type': 'application/json' },
           timeout: 30000, // 30 second timeout for auth requests
@@ -159,6 +169,10 @@ class VantaApiClient {
       try {
         // Ensure we have a valid token before making the request
         await this.authenticate();
+
+        // Acquire rate limiter token before making API request
+        // This prevents hitting the 20 req/min API endpoint limit
+        await this.rateLimiters.api.acquire();
 
         // Make the actual API request
         return await this.http.request(config);
@@ -413,6 +427,21 @@ class VantaApiClient {
       url: `/vulnerable-assets/${assetId}`,
     });
     return response.data;
+  }
+
+  /**
+   * Get rate limiter statistics
+   * @returns {Object} Statistics for all rate limiters
+   */
+  getRateLimiterStats() {
+    return this.rateLimiters.getAllStats();
+  }
+
+  /**
+   * Reset rate limiter statistics (useful for testing)
+   */
+  resetRateLimiters() {
+    this.rateLimiters.resetAll();
   }
 }
 
