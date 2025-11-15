@@ -622,6 +622,38 @@ class DataService {
   }
 
   /**
+   * Get detailed asset statistics with vulnerability breakdowns.
+   * Part of Phase 3 advanced features.
+   *
+   * @returns {Object} Detailed asset statistics including top critical/vulnerable assets, owner stats, and domain stats
+   */
+  getDetailedAssetStatistics() {
+    return this.database.getDetailedAssetStatistics();
+  }
+
+  /**
+   * Calculate health score for a specific asset.
+   * Part of Phase 3 advanced features.
+   *
+   * @param {string} assetId - The asset ID to calculate health score for
+   * @returns {number} Health score between 0 and 100 (higher is healthier)
+   */
+  calculateAssetHealthScore(assetId) {
+    return this.database.calculateAssetHealthScore(assetId);
+  }
+
+  /**
+   * Get assets sorted by health score.
+   * Part of Phase 3 advanced features.
+   *
+   * @param {number} [limit=100] - Maximum number of assets to return
+   * @returns {Array} Assets with health scores, sorted by score (worst first)
+   */
+  getAssetsByHealthScore(limit = 100) {
+    return this.database.getAssetsByHealthScore(limit);
+  }
+
+  /**
    * Sets a new database path and reconnects to the database.
    *
    * @param {string} newPath - The new database file path

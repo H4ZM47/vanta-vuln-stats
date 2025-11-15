@@ -140,3 +140,21 @@ ipcMain.handle('cves:list', (event, filters) => dataService.getCVEs(filters ?? {
 ipcMain.handle('cves:assets', (event, cveName, filters) =>
   dataService.getAssetsByCVE(cveName, filters ?? {})
 );
+
+// Phase 3: Advanced Features
+ipcMain.handle('assets:detailed-statistics', () => dataService.getDetailedAssetStatistics());
+
+ipcMain.handle('assets:health-score', (event, assetId) => {
+  if (!assetId || typeof assetId !== 'string') {
+    throw new Error('Invalid assetId parameter: must be a non-empty string');
+  }
+  return dataService.calculateAssetHealthScore(assetId);
+});
+
+ipcMain.handle('assets:by-health-score', (event, limit) => {
+  const validatedLimit = Number(limit ?? 100);
+  if (!Number.isInteger(validatedLimit) || validatedLimit < 1 || validatedLimit > 10000) {
+    throw new Error('Invalid limit parameter: must be an integer between 1 and 10000');
+  }
+  return dataService.getAssetsByHealthScore(validatedLimit);
+});
