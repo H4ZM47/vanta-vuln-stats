@@ -205,6 +205,74 @@ const formatDateTime = (value) => {
   return date.toLocaleString();
 };
 
+const formatSeverityBreakdown = (asset) => {
+  if (!asset) return '';
+  const definitions = [
+    { label: 'critical', keys: ['criticalCount', 'critical_count'] },
+    { label: 'high', keys: ['highCount', 'high_count'] },
+    { label: 'medium', keys: ['mediumCount', 'medium_count'] },
+    { label: 'low', keys: ['lowCount', 'low_count'] },
+  ];
+
+  const parts = definitions
+    .map(({ label, keys }) => {
+      const value = keys
+        .map((key) => (typeof asset?.[key] === 'number' ? asset[key] : Number(asset?.[key])))
+        .find((val) => Number.isFinite(val) && val > 0);
+      return value ? `${formatNumber(value)} ${label}` : null;
+    })
+    .filter(Boolean);
+
+  return parts.join(', ');
+};
+
+const normalizeVulnerableAssetSummary = (asset) => {
+  if (!asset?.id) {
+    return null;
+  }
+
+  const getNumber = (value, fallback = 0) => {
+    const numeric = typeof value === 'number' ? value : Number(value);
+    return Number.isFinite(numeric) ? numeric : fallback;
+  };
+
+  const vulnerabilityCount = getNumber(asset.vulnerability_count ?? asset.vulnerabilityCount);
+  const criticalCount = getNumber(asset.critical_count ?? asset.criticalCount);
+  const highCount = getNumber(asset.high_count ?? asset.highCount);
+  const mediumCount = getNumber(asset.medium_count ?? asset.mediumCount);
+  const lowCount = getNumber(asset.low_count ?? asset.lowCount);
+
+  return {
+    id: asset.id,
+    assetId: asset.id,
+    assetName: asset.display_name || asset.name || asset.assetName || asset.id || 'Unknown Asset',
+    displayName: asset.display_name || asset.name || asset.assetName || asset.id || 'Unknown Asset',
+    assetType: asset.asset_type || asset.type || asset.assetType || 'Unknown',
+    assetIntegrationId: asset.integration_id || asset.integrationId || null,
+    assetIntegrationType: asset.integration_type || asset.integrationType || null,
+    assetPlatform: asset.platform || asset.assetPlatform || null,
+    assetEnvironment: asset.environment || asset.assetEnvironment || null,
+    lastSeen: asset.last_detected || asset.lastSeen || null,
+    firstDetected: asset.first_detected || asset.firstDetected || null,
+    vulnerabilityCount,
+    activeCount: Number.isFinite(asset.activeCount) ? asset.activeCount : vulnerabilityCount,
+    remediatedCount: Number.isFinite(asset.remediatedCount) ? asset.remediatedCount : 0,
+    criticalCount,
+    critical_count: criticalCount,
+    highCount,
+    high_count: highCount,
+    mediumCount,
+    medium_count: mediumCount,
+    lowCount,
+    low_count: lowCount,
+    updatedAt: asset.updated_at || asset.updatedAt || null,
+    assetSubtype: asset.asset_subtype || asset.assetSubtype || null,
+    primaryOwner: asset.primary_owner || asset.primaryOwner || null,
+    externalIdentifier: asset.external_identifier || asset.externalIdentifier || asset.target_id || null,
+    raw: asset,
+  };
+};
+
 const switchTab = (tabName) => {
   // Update tab buttons
   elements.tabButtons.forEach((button) => {
@@ -317,22 +385,32 @@ const renderStatistics = (stats) => {
     .join('') || '<p>No CVSS scores recorded.</p>';
 
   // Asset statistics
-  const assetStats = stats.assets || {};
-  const assetTypeList = Object.entries(assetStats.byType || {})
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 8)
-    .map(([type, count]) => `<div class="list-item"><span>${type}</span><strong>${formatNumber(count)}</strong></div>`)
-    .join('') || '<p>No asset type data.</p>';
+  const assetStats = stats.assets ?? null;
+  const hasAssetStats = Boolean(assetStats?.total);
+  const assetTypeList = !hasAssetStats
+    ? '<p>No asset type data.</p>'
+    : (assetStats.byType || [])
+        .slice(0, 8)
+        .map(
+          (item) =>
+            `<div class="list-item"><span>${escapeHtml(item.label)}</span><strong>${formatNumber(item.count)}</strong></div>`
+        )
+        .join('') || '<p>No asset type data.</p>';
 
-  const topVulnerableAssets = (assetStats.topVulnerable || [])
-    .slice(0, 5)
-    .map((asset) => {
-      const name = asset.display_name || asset.id || 'Unknown';
-      const vulnCount = formatNumber(asset.vulnerability_count || 0);
-      const criticalBadge = asset.critical_count > 0 ? ` <span style="color: #ff4444;">(${asset.critical_count} critical)</span>` : '';
-      return `<div class="list-item"><span>${name}</span><strong>${vulnCount}${criticalBadge}</strong></div>`;
-    })
-    .join('') || '<p>No vulnerable assets.</p>';
+  const topVulnerableAssets = !hasAssetStats
+    ? '<p>No vulnerable assets.</p>'
+    : (assetStats.topVulnerable || [])
+        .slice(0, 5)
+        .map((asset) => {
+          const name = asset.name || asset.display_name || asset.id || 'Unknown';
+          const vulnCount = formatNumber(asset.vulnerabilityCount ?? asset.vulnerability_count ?? 0);
+          const criticalCount = asset.criticalCount ?? asset.critical_count ?? 0;
+          const criticalBadge = criticalCount > 0
+            ? ` <span style="color: #ff4444;">(${formatNumber(criticalCount)} critical)</span>`
+            : '';
+          return `<div class="list-item"><span>${escapeHtml(name)}</span><strong>${vulnCount}${criticalBadge}</strong></div>`;
+        })
+        .join('') || '<p>No vulnerable assets.</p>';
 
   elements.statistics.innerHTML = `
     <div class="stat-grid">
@@ -368,7 +446,7 @@ const renderStatistics = (stats) => {
       <h3>Average CVSS by Severity</h3>
       <div class="list-group">${averageList}</div>
     </div>
-    ${assetStats.total > 0 ? `
+    ${hasAssetStats ? `
       <div style="margin-top: 2rem; padding-top: 2rem; border-top: 1px solid var(--border-color);">
         <h2 style="margin-bottom: 1rem;">Vulnerable Assets Statistics</h2>
         <div class="stat-grid">
@@ -378,15 +456,19 @@ const renderStatistics = (stats) => {
           </div>
           <div class="stat-card">
             <h3>Average Vulnerabilities per Asset</h3>
-            <strong>${assetStats.averageVulnerabilitiesPerAsset ? assetStats.averageVulnerabilitiesPerAsset.toFixed(1) : '0'}</strong>
+            <strong>${
+              typeof assetStats.averageVulnerabilitiesPerAsset === 'number'
+                ? assetStats.averageVulnerabilitiesPerAsset.toFixed(1)
+                : '0'
+            }</strong>
           </div>
           <div class="stat-card">
             <h3>Assets with Critical Vulnerabilities</h3>
-            <strong>${formatNumber(assetStats.withCriticalVulnerabilities)}</strong>
+            <strong>${formatNumber(assetStats.withCriticalVulnerabilities ?? 0)}</strong>
           </div>
           <div class="stat-card">
             <h3>Assets with High Vulnerabilities</h3>
-            <strong>${formatNumber(assetStats.withHighVulnerabilities)}</strong>
+            <strong>${formatNumber(assetStats.withHighVulnerabilities ?? 0)}</strong>
           </div>
         </div>
         <div class="grid two-columns" style="margin-top: 1.5rem; gap: 1.5rem;">
@@ -592,7 +674,7 @@ const renderDetails = (vulnerability, remediations) => {
 const renderAssets = () => {
   const searchTerm = state.assetSearchTerm.toLowerCase();
   const filteredAssets = state.assets.filter((asset) => {
-    const haystack = `${asset.assetId || ''} ${asset.assetName || ''}`.toLowerCase();
+    const haystack = `${asset.assetId || ''} ${asset.assetName || ''} ${asset.displayName || ''}`.toLowerCase();
     return haystack.includes(searchTerm);
   });
 
@@ -613,9 +695,9 @@ const renderAssets = () => {
   elements.assetList.innerHTML = paginatedAssets
     .map((asset) => {
       const isSelected = state.selectedAsset === asset.assetId ? 'selected' : '';
-      const displayName = asset.assetName || asset.assetId || 'Unknown Asset';
+      const displayName = asset.assetName || asset.displayName || asset.assetId || 'Unknown Asset';
       const idLine =
-        asset.assetName && asset.assetId
+        displayName && asset.assetId
           ? `<div class="item-id">${escapeHtml(asset.assetId)}</div>`
           : '';
       const metaParts = [];
@@ -623,13 +705,15 @@ const renderAssets = () => {
       if (asset.assetPlatform) metaParts.push(asset.assetPlatform);
       if (asset.assetEnvironment) metaParts.push(asset.assetEnvironment);
       const metaLine = metaParts.length ? `<div class="item-meta">${escapeHtml(metaParts.join(' · '))}</div>` : '';
-      const lastSeen = asset.lastSeen ? ` • Last seen ${formatDate(asset.lastSeen)}` : '';
+      const lastSeen = asset.lastSeen ? ` • Last detected ${formatDate(asset.lastSeen)}` : '';
+      const severitySummary = formatSeverityBreakdown(asset);
+      const severityLine = severitySummary ? ` (${escapeHtml(severitySummary)})` : '';
       return `
         <li class="${isSelected}" data-asset-id="${escapeHtml(asset.assetId)}">
           <div class="item-name">${escapeHtml(displayName)}</div>
           ${idLine}
           ${metaLine}
-          <div class="item-count">${formatNumber(asset.vulnerabilityCount)} vulnerabilities (${formatNumber(asset.activeCount)} active, ${formatNumber(asset.remediatedCount)} remediated)${lastSeen}</div>
+          <div class="item-count">${formatNumber(asset.vulnerabilityCount)} vulnerabilities${severityLine}${lastSeen}</div>
         </li>
       `;
     })
@@ -664,24 +748,135 @@ const renderAssetMetadata = (assetId, assetDetails) => {
   }
 
   const summary = state.assets.find((asset) => asset.assetId === assetId) || {};
-  const metadata = assetDetails ?? state.assetDetails.get(assetId) ?? null;
-  const displayName = metadata?.name || summary.assetName || assetId || 'Unknown Asset';
-  const externalIdentifier = metadata?.external_identifier || summary.externalIdentifier || null;
-  const integrationId = metadata?.integration_id || summary.assetIntegrationId || null;
-  const integrationType = metadata?.integration_type || summary.assetIntegrationType || null;
+  const details = assetDetails ?? state.assetDetails.get(assetId) ?? null;
+  const rawDetails = details?.raw_data && typeof details.raw_data === 'object' ? details.raw_data : null;
+  const metadata = details?.metadata && typeof details.metadata === 'object' ? details.metadata : null;
+  const detailSource = rawDetails || metadata || details || {};
+  const pickValue = (...values) => values.find((value) => value !== undefined && value !== null && value !== '') ?? null;
+  const normalizeOwnerEntry = (entry) => {
+    if (!entry) return null;
+    if (typeof entry === 'string') return entry;
+    if (typeof entry === 'number' || typeof entry === 'boolean') return String(entry);
+    if (typeof entry === 'object') {
+      return entry.name || entry.email || entry.handle || entry.id || null;
+    }
+    return null;
+  };
+  const getTagValue = (tags, key) => {
+    if (!Array.isArray(tags)) return null;
+    const match = tags.find((tag) => {
+      if (!tag) return false;
+      const tagKey = (tag.key || tag.name || tag.label || '').toLowerCase();
+      return tagKey === key.toLowerCase();
+    });
+    return match ? match.value || match.name || match.label || null : null;
+  };
+
+  const scanner = Array.isArray(detailSource.scanners) ? detailSource.scanners[0] : null;
+  const displayName = pickValue(
+    detailSource.display_name,
+    detailSource.name,
+    metadata?.display_name,
+    metadata?.name,
+    summary.assetName,
+    summary.displayName,
+    assetId,
+  ) || 'Unknown Asset';
+
+  const externalIdentifier = pickValue(
+    detailSource.external_identifier,
+    detailSource.externalIdentifier,
+    detailSource.resourceIdentifier,
+    detailSource.uniqueIdentifier,
+    metadata?.external_identifier,
+    metadata?.externalIdentifier,
+    scanner?.targetId,
+    summary.externalIdentifier,
+  );
+
+  const integrationId = pickValue(
+    detailSource.integration_id,
+    detailSource.integrationId,
+    summary.assetIntegrationId,
+  );
+  const integrationType = pickValue(
+    detailSource.integration_type,
+    detailSource.integrationType,
+    summary.assetIntegrationType,
+  );
+
   const owner =
-    metadata?.primary_owner ||
-    (Array.isArray(metadata?.owners) ? metadata.owners[0] : null) ||
-    summary.primaryOwner ||
-    null;
-  const risk = metadata?.risk_level || null;
-  const subtype = metadata?.asset_subtype || summary.assetSubtype || null;
+    pickValue(
+      detailSource.primary_owner,
+      detailSource.primaryOwner,
+      metadata?.primary_owner,
+      metadata?.primaryOwner,
+      summary.primaryOwner,
+    ) ||
+    (() => {
+      const ownerCandidates =
+        detailSource.owners ||
+        metadata?.owners ||
+        detailSource.ownerList ||
+        metadata?.ownerList ||
+        [];
+      if (Array.isArray(ownerCandidates)) {
+        const normalized = ownerCandidates.map(normalizeOwnerEntry).filter(Boolean);
+        return normalized[0] || null;
+      }
+      return normalizeOwnerEntry(ownerCandidates);
+    })();
 
-  const badgeValues = [risk, subtype].filter(Boolean);
-  elements.assetMetaBadges.innerHTML = badgeValues
-    .map((badge) => `<span class="asset-badge">${escapeHtml(String(badge))}</span>`)
-    .join('');
+  const risk = pickValue(
+    detailSource.risk_level,
+    detailSource.riskLevel,
+    metadata?.risk_level,
+    metadata?.riskLevel,
+  );
+  const subtype = pickValue(
+    detailSource.asset_subtype,
+    detailSource.assetSubtype,
+    metadata?.asset_subtype,
+    metadata?.assetSubtype,
+    summary.assetSubtype,
+  );
+  const environment = pickValue(
+    detailSource.environment,
+    detailSource.environmentName,
+    detailSource.environment_type,
+    metadata?.environment,
+    metadata?.environmentName,
+    getTagValue(scanner?.assetTags, 'environment'),
+    summary.assetEnvironment,
+  );
+  const platform = pickValue(
+    detailSource.platform,
+    detailSource.platformName,
+    detailSource.operating_system,
+    detailSource.operatingSystem,
+    detailSource.os,
+    metadata?.platform,
+    metadata?.operatingSystem,
+    Array.isArray(scanner?.operatingSystems) ? scanner.operatingSystems[0] : null,
+    summary.assetPlatform,
+  );
 
+  const badgeValues = [risk, subtype]
+    .filter(Boolean)
+    .map((badge) => `<span class="asset-badge">${escapeHtml(String(badge))}</span>`);
+  const severityBadges = [
+    { label: 'Critical', count: summary.criticalCount },
+    { label: 'High', count: summary.highCount },
+    { label: 'Medium', count: summary.mediumCount },
+    { label: 'Low', count: summary.lowCount },
+  ]
+    .filter((item) => Number.isFinite(item.count) && item.count > 0)
+    .map(
+      (item) =>
+        `<span class="asset-badge">${formatNumber(item.count)} ${escapeHtml(item.label)}</span>`
+    );
+
+  elements.assetMetaBadges.innerHTML = [...badgeValues, ...severityBadges].join('');
   elements.assetMetaName.textContent = displayName;
   elements.assetMetaId.textContent = externalIdentifier
     ? `${assetId} • ${externalIdentifier}`
@@ -689,12 +884,16 @@ const renderAssetMetadata = (assetId, assetDetails) => {
   elements.assetMetaIntegration.textContent = [integrationType, integrationId].filter(Boolean).join(' • ') || '—';
   elements.assetMetaOwner.textContent = owner || '—';
   elements.assetMetaType.textContent =
-    metadata?.asset_type || summary.assetType || '—';
-  elements.assetMetaEnvironment.textContent =
-    metadata?.environment || summary.assetEnvironment || '—';
-  elements.assetMetaPlatform.textContent =
-    metadata?.platform || summary.assetPlatform || '—';
-  const lastSeen = metadata?.last_seen || summary.lastSeen;
+    detailSource.asset_type || detailSource.assetType || metadata?.asset_type || summary.assetType || '—';
+  elements.assetMetaEnvironment.textContent = environment || '—';
+  elements.assetMetaPlatform.textContent = platform || '—';
+  const lastSeen = pickValue(
+    detailSource.last_detected,
+    detailSource.lastDetected,
+    metadata?.last_detected,
+    metadata?.lastDetected,
+    summary.lastSeen,
+  );
   elements.assetMetaLastSeen.textContent = lastSeen ? formatDateTime(lastSeen) : '—';
 };
 
@@ -910,10 +1109,14 @@ const loadAssets = async () => {
 
     // Fetch fresh data
     elements.assetList.innerHTML = '<li style="padding: 2rem; text-align: center;">Loading assets...</li>';
-    state.assets = await window.vanta.getVulnerableAssets(state.filters);
+    const assetResponse = await window.vanta.getVulnerableAssets({ filters: state.filters });
+    const normalizedAssets = Array.isArray(assetResponse?.data)
+      ? assetResponse.data.map(normalizeVulnerableAssetSummary).filter(Boolean)
+      : [];
+    state.assets = normalizedAssets;
 
     // Update cache
-    state.assetCache = state.assets;
+    state.assetCache = normalizedAssets;
     state.assetCacheFilters = filtersKey;
 
     // Reset to first page when data changes
@@ -942,10 +1145,13 @@ const selectAsset = async (assetId) => {
     renderAssetMetadata(assetId, state.assetDetails.get(assetId) || null);
     elements.assetVulnTable.innerHTML = '<tr><td colspan="4" style="text-align: center; padding: 2rem;">Loading vulnerabilities...</td></tr>';
 
-    const [vulnerabilities, assetDetails] = await Promise.all([
+    const [vulnerabilities, vulnerableAssetDetails] = await Promise.all([
       window.vanta.getVulnerabilitiesByAsset(assetId, state.filters),
-      window.vanta.getAssetDetails(assetId).catch(() => null),
+      window.vanta.getVulnerableAssetDetails(assetId).catch(() => null),
     ]);
+    const assetDetails =
+      vulnerableAssetDetails ??
+      (await window.vanta.getAssetDetails(assetId).catch(() => null));
 
     if (assetDetails) {
       state.assetDetails.set(assetId, assetDetails);
@@ -1346,9 +1552,10 @@ const attachEventListeners = () => {
 
   elements.nextAssetPage.addEventListener('click', () => {
     const searchTerm = state.assetSearchTerm.toLowerCase();
-    const filteredAssets = state.assets.filter((asset) =>
-      (asset.assetId || '').toLowerCase().includes(searchTerm)
-    );
+    const filteredAssets = state.assets.filter((asset) => {
+      const haystack = `${asset.assetId || ''} ${asset.assetName || ''} ${asset.displayName || ''}`.toLowerCase();
+      return haystack.includes(searchTerm);
+    });
     const maxPage = Math.ceil(filteredAssets.length / state.assetPageSize);
     if (state.assetPage < maxPage) {
       state.assetPage += 1;
