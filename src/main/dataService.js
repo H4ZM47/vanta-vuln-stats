@@ -552,12 +552,27 @@ class DataService {
     return this.database.getAssets(filters);
   }
 
+  getVulnerableAssets(options = {}) {
+    const { filters = {}, limit = 100, offset = 0, sortColumn = 'vulnerability_count', sortDirection = 'desc' } = options;
+    const data = this.database.getVulnerableAssets({ filters, limit, offset, sortColumn, sortDirection });
+    const total = this.database.getVulnerableAssetCount(filters);
+    return { data, total };
+  }
+
   getVulnerabilitiesByAsset(assetId, filters = {}) {
     return this.database.getVulnerabilitiesByAsset(assetId, filters);
   }
 
+  getVulnerabilitiesForAsset(assetId) {
+    return this.database.getVulnerabilitiesForAsset(assetId);
+  }
+
   getAssetDetails(assetId) {
     return this.database.getAssetDetails(assetId);
+  }
+
+  getVulnerableAssetDetails(id) {
+    return this.database.getVulnerableAssetDetails(id);
   }
 
   getCVEs(filters = {}) {
