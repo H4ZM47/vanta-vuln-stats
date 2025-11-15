@@ -278,3 +278,102 @@ test('Phase 3: getDetailedAssetStatistics limits results to specified count', ()
     cleanupDb(db);
   }
 });
+
+test('Phase 3: getAssetsByHealthScore includes assets with zero vulnerabilities', () => {
+  const db = createTempDb();
+
+  try {
+    // Create assets: some with vulns, some without
+    db.storeAssetsBatch([
+      { id: 'asset-dirty', name: 'Vulnerable Server', assetType: 'SERVER' },
+      { id: 'asset-clean-1', name: 'Clean Server 1', assetType: 'SERVER' },
+      { id: 'asset-clean-2', name: 'Clean Server 2', assetType: 'SERVER' }
+    ]);
+
+    // Only give one asset vulnerabilities
+    db.storeVulnerabilitiesBatch([
+      { id: 'v-1', targetId: 'asset-dirty', name: 'CVE-001', severity: 'CRITICAL', cvssSeverityScore: 9.0 }
+    ]);
+
+    const results = db.getAssetsByHealthScore(10);
+
+    // Should include all 3 assets
+    assert.equal(results.length, 3, 'Should include all assets, even those with zero vulnerabilities');
+
+    // Clean assets should have score of 100
+    const cleanAsset1 = results.find(a => a.id === 'asset-clean-1');
+    const cleanAsset2 = results.find(a => a.id === 'asset-clean-2');
+    assert.ok(cleanAsset1, 'Should include clean asset 1');
+    assert.ok(cleanAsset2, 'Should include clean asset 2');
+    assert.equal(cleanAsset1.healthScore, 100, 'Clean asset should have perfect health score of 100');
+    assert.equal(cleanAsset2.healthScore, 100, 'Clean asset should have perfect health score of 100');
+
+    // Dirty asset should have lower score
+    const dirtyAsset = results.find(a => a.id === 'asset-dirty');
+    assert.ok(dirtyAsset, 'Should include vulnerable asset');
+    assert.ok(dirtyAsset.healthScore < 100, 'Vulnerable asset should have health score below 100');
+
+    // Clean assets should be sorted last (best health = highest score)
+    const lastIndex = results.length - 1;
+    assert.ok(
+      results[lastIndex].healthScore === 100,
+      'Assets with best health (100) should be sorted last'
+    );
+  } finally {
+    cleanupDb(db);
+  }
+});
+
+test('Phase 3: calculateAssetHealthScore throws error for non-existent asset', () => {
+  const db = createTempDb();
+
+  try {
+    // Create one asset
+    db.storeAssetsBatch([{ id: 'asset-exists', name: 'Real Asset', assetType: 'SERVER' }]);
+
+    // Non-existent asset should throw error
+    assert.throws(
+      () => db.calculateAssetHealthScore('asset-does-not-exist'),
+      /Asset not found/,
+      'Should throw error for non-existent asset'
+    );
+
+    // Existing asset with no vulnerabilities should return 100 (not throw)
+    const score = db.calculateAssetHealthScore('asset-exists');
+    assert.equal(score, 100, 'Real asset with no vulnerabilities should return 100');
+  } finally {
+    cleanupDb(db);
+  }
+});
+
+test('Phase 3: getDetailedAssetStatistics includes remediated vulnerabilities in total count', () => {
+  const db = createTempDb();
+
+  try {
+    db.storeAssetsBatch([
+      { id: 'asset-1', name: 'Server 1', assetType: 'SERVER', owners: ['owner@example.com'] }
+    ]);
+
+    // Create vulnerabilities: some active, some remediated
+    db.storeVulnerabilitiesBatch([
+      { id: 'v-1', targetId: 'asset-1', name: 'CVE-001', severity: 'CRITICAL' }, // Active
+      { id: 'v-2', targetId: 'asset-1', name: 'CVE-002', severity: 'HIGH' }, // Active
+      { id: 'v-3', targetId: 'asset-1', name: 'CVE-003', severity: 'MEDIUM', deactivateMetadata: { deactivatedOnDate: '2024-01-01' } }, // Remediated
+      { id: 'v-4', targetId: 'asset-1', name: 'CVE-004', severity: 'LOW', deactivateMetadata: { deactivatedOnDate: '2024-01-02' } } // Remediated
+    ]);
+
+    const stats = db.getDetailedAssetStatistics();
+
+    // topVulnerableAssets should include ALL vulnerabilities (active + remediated)
+    const topAsset = stats.topVulnerableAssets.find(a => a.id === 'asset-1');
+    assert.ok(topAsset, 'Should include asset in topVulnerableAssets');
+    assert.equal(topAsset.vuln_count, 4, 'Total vuln_count should include both active and remediated (2 + 2 = 4)');
+    assert.equal(topAsset.active_count, 2, 'Should report 2 active vulnerabilities');
+    assert.equal(topAsset.remediated_count, 2, 'Should report 2 remediated vulnerabilities');
+    assert.equal(topAsset.critical, 1, 'Should count 1 critical vulnerability');
+    assert.equal(topAsset.high, 1, 'Should count 1 high vulnerability');
+    assert.equal(topAsset.medium, 1, 'Should count 1 medium vulnerability (even though remediated)');
+  } finally {
+    cleanupDb(db);
+  }
+});

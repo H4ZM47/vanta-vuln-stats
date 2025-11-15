@@ -1863,7 +1863,7 @@ class VulnerabilityDatabase {
    *
    * @param {string} assetId - The asset ID to calculate health score for
    * @returns {number} Health score between 0 and 100
-   * @throws {Error} If assetId is invalid
+   * @throws {Error} If assetId is invalid or asset does not exist
    */
   calculateAssetHealthScore(assetId) {
     // Input validation
@@ -1872,6 +1872,12 @@ class VulnerabilityDatabase {
     }
 
     try {
+      // First verify the asset exists
+      const assetExists = this.db.prepare('SELECT 1 FROM assets WHERE id = ?').get(assetId);
+      if (!assetExists) {
+        throw new Error(`Asset not found: ${assetId}`);
+      }
+
       const metrics = this.db.prepare(`
         SELECT
           COUNT(*) as total_vulns,
@@ -1886,7 +1892,7 @@ class VulnerabilityDatabase {
       `).get(assetId);
 
       if (!metrics || metrics.total_vulns === 0) {
-        return 100; // No vulnerabilities = perfect health
+        return 100; // Real asset with no vulnerabilities = perfect health
       }
 
       // Weighted scoring formula
@@ -1913,9 +1919,9 @@ class VulnerabilityDatabase {
   }
 
   /**
-   * Get assets sorted by health score using optimized single-query approach.
+   * Get all assets sorted by health score using optimized single-query approach.
    * This method calculates health scores for all assets in a single SQL query,
-   * avoiding the N+1 query problem.
+   * avoiding the N+1 query problem. Includes assets with zero vulnerabilities (100 score).
    *
    * @param {number} [limit=100] - Maximum number of assets to return
    * @returns {Array<{id: string, display_name: string, owner_email: string, healthScore: number}>}
@@ -1931,6 +1937,7 @@ class VulnerabilityDatabase {
 
     try {
       // Single optimized query using CTE to calculate health scores
+      // Uses LEFT JOIN to include assets with zero vulnerabilities
       const assets = this.db.prepare(`
         WITH asset_metrics AS (
           SELECT
@@ -1949,17 +1956,20 @@ class VulnerabilityDatabase {
           a.id,
           a.name as display_name,
           a.primary_owner as owner_email,
-          (
-            100
-            - (COALESCE(am.critical, 0) * 25)
-            - (COALESCE(am.high, 0) * 10)
-            - (COALESCE(am.medium, 0) * 3)
-            - (COALESCE(am.low, 0) * 1)
-            - (COALESCE(am.avg_cvss, 0) * 2)
-            + ((1.0 - (CAST(am.active AS REAL) / am.total_vulns)) * 20)
-          ) as healthScore
+          CASE
+            WHEN am.total_vulns IS NULL OR am.total_vulns = 0 THEN 100
+            ELSE (
+              100
+              - (COALESCE(am.critical, 0) * 25)
+              - (COALESCE(am.high, 0) * 10)
+              - (COALESCE(am.medium, 0) * 3)
+              - (COALESCE(am.low, 0) * 1)
+              - (COALESCE(am.avg_cvss, 0) * 2)
+              + ((1.0 - (CAST(am.active AS REAL) / am.total_vulns)) * 20)
+            )
+          END as healthScore
         FROM assets a
-        INNER JOIN asset_metrics am ON a.id = am.id
+        LEFT JOIN asset_metrics am ON a.id = am.id
         ORDER BY healthScore ASC
         LIMIT ?
       `).all(validatedLimit);
@@ -2007,7 +2017,7 @@ class VulnerabilityDatabase {
         LIMIT 10
       `).all();
 
-      // Assets with most total vulnerabilities
+      // Assets with most total vulnerabilities (includes both active and remediated)
       const topVulnerableAssets = this.db.prepare(`
         SELECT
           a.id,
@@ -2016,10 +2026,11 @@ class VulnerabilityDatabase {
           COUNT(*) as vuln_count,
           SUM(CASE WHEN v.severity = 'CRITICAL' THEN 1 ELSE 0 END) as critical,
           SUM(CASE WHEN v.severity = 'HIGH' THEN 1 ELSE 0 END) as high,
-          SUM(CASE WHEN v.severity = 'MEDIUM' THEN 1 ELSE 0 END) as medium
+          SUM(CASE WHEN v.severity = 'MEDIUM' THEN 1 ELSE 0 END) as medium,
+          SUM(CASE WHEN v.deactivated_on IS NULL THEN 1 ELSE 0 END) as active_count,
+          SUM(CASE WHEN v.deactivated_on IS NOT NULL THEN 1 ELSE 0 END) as remediated_count
         FROM vulnerabilities v
         JOIN assets a ON v.target_id = a.id
-        WHERE v.deactivated_on IS NULL
         GROUP BY a.id, a.name, a.primary_owner
         ORDER BY vuln_count DESC
         LIMIT 10
