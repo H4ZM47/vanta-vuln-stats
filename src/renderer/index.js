@@ -308,6 +308,48 @@ const renderStatistics = (stats) => {
     })
     .join('') || '<p>No CVSS scores recorded.</p>';
 
+  // Format asset statistics if available
+  let assetStatsSection = '';
+  if (stats.assets && stats.assets.total > 0) {
+    const assetsByType = stats.assets.byType
+      .slice(0, 5)
+      .map((item) => `<div class="list-item"><span>${escapeHtml(item.label)}</span><strong>${formatNumber(item.count)} (${item.percentage})</strong></div>`)
+      .join('') || '<p>No asset type data.</p>';
+
+    const topVulnerableAssets = stats.assets.topVulnerable
+      .slice(0, 3)
+      .map((asset, index) => {
+        const criticalAndHigh = asset.criticalAndHigh;
+        const criticalAndHighLabel = criticalAndHigh > 0 ? ` (${formatNumber(criticalAndHigh)} critical/high)` : '';
+        return `<div class="list-item"><span>${index + 1}. ${escapeHtml(asset.name)}</span><strong>${formatNumber(asset.vulnerabilityCount)} vulns${criticalAndHighLabel}</strong></div>`;
+      })
+      .join('') || '<p>No vulnerable assets found.</p>';
+
+    assetStatsSection = `
+      <div class="stat-card asset-stats-card">
+        <h3>Vulnerable Assets</h3>
+        <div class="asset-stats-summary">
+          <div class="asset-stats-total">
+            <strong>${formatNumber(stats.assets.total)}</strong>
+            <span>Total Assets</span>
+          </div>
+          <div class="asset-stats-average">
+            <strong>${stats.assets.averageVulnerabilitiesPerAsset.toFixed(1)}</strong>
+            <span>Avg Vulns/Asset</span>
+          </div>
+        </div>
+        <div style="margin-top: 1rem;">
+          <h4 style="font-size: 0.875rem; margin-bottom: 0.5rem; color: rgba(148, 163, 184, 1);">By Type</h4>
+          <div class="list-group">${assetsByType}</div>
+        </div>
+        <div style="margin-top: 1rem;">
+          <h4 style="font-size: 0.875rem; margin-bottom: 0.5rem; color: rgba(148, 163, 184, 1);">Top Vulnerable</h4>
+          <div class="list-group">${topVulnerableAssets}</div>
+        </div>
+      </div>
+    `;
+  }
+
   elements.statistics.innerHTML = `
     <div class="stat-grid">
       <div class="stat-card">
@@ -328,6 +370,7 @@ const renderStatistics = (stats) => {
         <strong>${formatNumber(stats.uniqueAssets)} assets / ${formatNumber(stats.uniqueCves)} CVEs</strong>
       </div>
     </div>
+    ${assetStatsSection}
     <div class="grid two-columns" style="margin-top: 1.5rem; gap: 1.5rem;">
       <div>
         <h3>By Severity</h3>
