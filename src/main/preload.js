@@ -33,4 +33,12 @@ contextBridge.exposeInMainWorld('vanta', {
   getAssetDetails: (assetId) => ipcRenderer.invoke('assets:details', assetId),
   getCVEs: (filters) => ipcRenderer.invoke('cves:list', filters ?? {}),
   getAssetsByCVE: (cveName, filters) => ipcRenderer.invoke('cves:assets', cveName, filters ?? {}),
+  // Vulnerable Assets (Phase 2)
+  getVulnerableAssets: (options) => ipcRenderer.invoke('vulnerable-assets:list', options ?? {}),
+  getVulnerableAssetDetails: (id) => ipcRenderer.invoke('vulnerable-assets:details', id),
+  getVulnerabilitiesForAsset: (assetId) => ipcRenderer.invoke('vulnerable-assets:vulnerabilities', assetId),
+  // Phase 3: Advanced Features
+  getDetailedAssetStatistics: () => ipcRenderer.invoke('assets:detailed-statistics'),
+  calculateAssetHealthScore: (assetId) => ipcRenderer.invoke('assets:health-score', assetId),
+  getAssetsByHealthScore: (limit) => ipcRenderer.invoke('assets:by-health-score', limit ?? 100),
 });

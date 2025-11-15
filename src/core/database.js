@@ -1913,6 +1913,237 @@ class VulnerabilityDatabase {
     };
   }
 
+  /**
+   * Calculate asset health score (0-100) based on vulnerability metrics.
+   * Higher score = healthier asset.
+   *
+   * This method uses a weighted scoring formula that considers:
+   * - Number of vulnerabilities by severity (critical weighted highest)
+   * - Average CVSS score of vulnerabilities
+   * - Remediation rate (bonus for high remediation rate)
+   *
+   * @param {string} assetId - The asset ID to calculate health score for
+   * @returns {number} Health score between 0 and 100
+   * @throws {Error} If assetId is invalid or asset does not exist
+   */
+  calculateAssetHealthScore(assetId) {
+    // Input validation
+    if (!assetId || typeof assetId !== 'string') {
+      throw new Error('Invalid assetId: must be a non-empty string');
+    }
+
+    try {
+      // First verify the asset exists
+      const assetExists = this.db.prepare('SELECT 1 FROM assets WHERE id = ?').get(assetId);
+      if (!assetExists) {
+        throw new Error(`Asset not found: ${assetId}`);
+      }
+
+      const metrics = this.db.prepare(`
+        SELECT
+          COUNT(*) as total_vulns,
+          SUM(CASE WHEN severity = 'CRITICAL' THEN 1 ELSE 0 END) as critical,
+          SUM(CASE WHEN severity = 'HIGH' THEN 1 ELSE 0 END) as high,
+          SUM(CASE WHEN severity = 'MEDIUM' THEN 1 ELSE 0 END) as medium,
+          SUM(CASE WHEN severity = 'LOW' THEN 1 ELSE 0 END) as low,
+          AVG(cvss_score) as avg_cvss,
+          SUM(CASE WHEN deactivated_on IS NULL THEN 1 ELSE 0 END) as active
+        FROM vulnerabilities
+        WHERE target_id = ?
+      `).get(assetId);
+
+      if (!metrics || metrics.total_vulns === 0) {
+        return 100; // Real asset with no vulnerabilities = perfect health
+      }
+
+      // Weighted scoring formula
+      let score = 100;
+      score -= (metrics.critical || 0) * 25; // Each critical reduces score by 25
+      score -= (metrics.high || 0) * 10;     // Each high reduces score by 10
+      score -= (metrics.medium || 0) * 3;    // Each medium reduces score by 3
+      score -= (metrics.low || 0) * 1;       // Each low reduces score by 1
+
+      // Factor in CVSS average (0-10 scale, multiply by 2 for impact)
+      if (metrics.avg_cvss) {
+        score -= (metrics.avg_cvss * 2);
+      }
+
+      // Bonus for having few active vulnerabilities (high remediation rate)
+      const remediationRate = 1 - (metrics.active / metrics.total_vulns);
+      score += remediationRate * 20;
+
+      return Math.max(0, Math.min(100, Math.round(score))); // Clamp between 0-100
+    } catch (error) {
+      console.error(`[VulnerabilityDatabase] Failed to calculate health score for asset ${assetId}:`, error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get all assets sorted by health score using optimized single-query approach.
+   * This method calculates health scores for all assets in a single SQL query,
+   * avoiding the N+1 query problem. Includes assets with zero vulnerabilities (100 score).
+   *
+   * @param {number} [limit=100] - Maximum number of assets to return
+   * @returns {Array<{id: string, display_name: string, owner_email: string, healthScore: number}>}
+   *   Assets with health scores, sorted by score (worst first)
+   * @throws {Error} If limit is invalid
+   */
+  getAssetsByHealthScore(limit = 100) {
+    // Input validation
+    const validatedLimit = Number(limit);
+    if (!Number.isInteger(validatedLimit) || validatedLimit < 1 || validatedLimit > 10000) {
+      throw new Error('Invalid limit: must be an integer between 1 and 10000');
+    }
+
+    try {
+      // Single optimized query using CTE to calculate health scores
+      // Uses LEFT JOIN to include assets with zero vulnerabilities
+      const assets = this.db.prepare(`
+        WITH asset_metrics AS (
+          SELECT
+            v.target_id as id,
+            COUNT(*) as total_vulns,
+            SUM(CASE WHEN v.severity = 'CRITICAL' THEN 1 ELSE 0 END) as critical,
+            SUM(CASE WHEN v.severity = 'HIGH' THEN 1 ELSE 0 END) as high,
+            SUM(CASE WHEN v.severity = 'MEDIUM' THEN 1 ELSE 0 END) as medium,
+            SUM(CASE WHEN v.severity = 'LOW' THEN 1 ELSE 0 END) as low,
+            COALESCE(AVG(v.cvss_score), 0) as avg_cvss,
+            SUM(CASE WHEN v.deactivated_on IS NULL THEN 1 ELSE 0 END) as active
+          FROM vulnerabilities v
+          GROUP BY v.target_id
+        )
+        SELECT
+          a.id,
+          a.name as display_name,
+          a.primary_owner as owner_email,
+          CASE
+            WHEN am.total_vulns IS NULL OR am.total_vulns = 0 THEN 100
+            ELSE (
+              100
+              - (COALESCE(am.critical, 0) * 25)
+              - (COALESCE(am.high, 0) * 10)
+              - (COALESCE(am.medium, 0) * 3)
+              - (COALESCE(am.low, 0) * 1)
+              - (COALESCE(am.avg_cvss, 0) * 2)
+              + ((1.0 - (CAST(am.active AS REAL) / am.total_vulns)) * 20)
+            )
+          END as healthScore
+        FROM assets a
+        LEFT JOIN asset_metrics am ON a.id = am.id
+        ORDER BY healthScore ASC
+        LIMIT ?
+      `).all(validatedLimit);
+
+      // Clamp health scores to 0-100 range
+      return assets.map(asset => ({
+        ...asset,
+        healthScore: Math.max(0, Math.min(100, Math.round(asset.healthScore)))
+      }));
+    } catch (error) {
+      console.error('[VulnerabilityDatabase] Failed to retrieve assets by health score:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get detailed asset statistics with vulnerability breakdowns.
+   *
+   * Returns comprehensive statistics including:
+   * - Top 10 assets with most critical vulnerabilities
+   * - Top 10 assets with most total vulnerabilities
+   * - Owner-level aggregations (assets and vulnerabilities per owner)
+   * - Domain-level aggregations (extracted from asset names)
+   *
+   * @returns {Object} Detailed asset statistics
+   * @returns {Array} return.topCriticalAssets - Top 10 assets by critical vulnerability count
+   * @returns {Array} return.topVulnerableAssets - Top 10 assets by total vulnerability count
+   * @returns {Array} return.ownerStats - Statistics grouped by asset owner
+   * @returns {Array} return.domainStats - Statistics grouped by extracted domain
+   */
+  getDetailedAssetStatistics() {
+    try {
+      // Assets with most critical vulnerabilities
+      const topCriticalAssets = this.db.prepare(`
+        SELECT
+          a.id,
+          a.name as display_name,
+          a.primary_owner as owner_email,
+          COUNT(*) as critical_count
+        FROM vulnerabilities v
+        JOIN assets a ON v.target_id = a.id
+        WHERE v.severity = 'CRITICAL' AND v.deactivated_on IS NULL
+        GROUP BY a.id, a.name, a.primary_owner
+        ORDER BY critical_count DESC
+        LIMIT 10
+      `).all();
+
+      // Assets with most total vulnerabilities (includes both active and remediated)
+      const topVulnerableAssets = this.db.prepare(`
+        SELECT
+          a.id,
+          a.name as display_name,
+          a.primary_owner as owner_email,
+          COUNT(*) as vuln_count,
+          SUM(CASE WHEN v.severity = 'CRITICAL' THEN 1 ELSE 0 END) as critical,
+          SUM(CASE WHEN v.severity = 'HIGH' THEN 1 ELSE 0 END) as high,
+          SUM(CASE WHEN v.severity = 'MEDIUM' THEN 1 ELSE 0 END) as medium,
+          SUM(CASE WHEN v.deactivated_on IS NULL THEN 1 ELSE 0 END) as active_count,
+          SUM(CASE WHEN v.deactivated_on IS NOT NULL THEN 1 ELSE 0 END) as remediated_count
+        FROM vulnerabilities v
+        JOIN assets a ON v.target_id = a.id
+        GROUP BY a.id, a.name, a.primary_owner
+        ORDER BY vuln_count DESC
+        LIMIT 10
+      `).all();
+
+      // Owner-level aggregations with NULL handling
+      const ownerStats = this.db.prepare(`
+        SELECT
+          a.primary_owner as owner_email,
+          COUNT(DISTINCT a.id) as asset_count,
+          COUNT(DISTINCT v.id) as vuln_count,
+          COALESCE(AVG(v.cvss_score), 0) as avg_cvss
+        FROM assets a
+        LEFT JOIN vulnerabilities v ON v.target_id = a.id
+        WHERE a.primary_owner IS NOT NULL
+        GROUP BY a.primary_owner
+        ORDER BY vuln_count DESC
+        LIMIT 20
+      `).all();
+
+      // Domain-level aggregations (extract domain from environment or platform)
+      const domainStats = this.db.prepare(`
+        SELECT
+          a.environment as domain,
+          COUNT(DISTINCT a.id) as asset_count,
+          COUNT(DISTINCT v.id) as vuln_count
+        FROM assets a
+        LEFT JOIN vulnerabilities v ON v.target_id = a.id
+        WHERE a.environment IS NOT NULL
+        GROUP BY a.environment
+        ORDER BY vuln_count DESC
+        LIMIT 20
+      `).all();
+
+      return {
+        topCriticalAssets,
+        topVulnerableAssets,
+        ownerStats,
+        domainStats,
+      };
+    } catch (error) {
+      console.error('[VulnerabilityDatabase] Failed to retrieve detailed asset statistics:', error);
+      // Return empty statistics on error for graceful degradation
+      return {
+        topCriticalAssets: [],
+        topVulnerableAssets: [],
+        ownerStats: [],
+        domainStats: [],
+      };
+    }
+  }
+
   _getRemediationStatistics(where, params) {
     // Build the WHERE clause for remediations that match filtered vulnerabilities
     const remediationWhere = where
