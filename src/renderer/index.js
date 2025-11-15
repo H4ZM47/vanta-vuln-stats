@@ -99,6 +99,10 @@ const elements = {
   fixable: document.getElementById('fixable'),
   integration: document.getElementById('integration'),
   assetId: document.getElementById('assetId'),
+  assetName: document.getElementById('assetName'),
+  assetOwner: document.getElementById('assetOwner'),
+  assetDomain: document.getElementById('assetDomain'),
+  assetType: document.getElementById('assetType'),
   cve: document.getElementById('cve'),
   dateIdentifiedStart: document.getElementById('dateIdentifiedStart'),
   dateIdentifiedEnd: document.getElementById('dateIdentifiedEnd'),
@@ -137,6 +141,10 @@ const defaultFilters = () => ({
   fixable: 'any',
   integration: '',
   assetId: '',
+  assetName: '',
+  assetOwner: '',
+  assetDomain: '',
+  assetType: '',
   cve: '',
   dateIdentifiedStart: '',
   dateIdentifiedEnd: '',
@@ -308,6 +316,24 @@ const renderStatistics = (stats) => {
     })
     .join('') || '<p>No CVSS scores recorded.</p>';
 
+  // Asset statistics
+  const assetStats = stats.assets || {};
+  const assetTypeList = Object.entries(assetStats.byType || {})
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 8)
+    .map(([type, count]) => `<div class="list-item"><span>${type}</span><strong>${formatNumber(count)}</strong></div>`)
+    .join('') || '<p>No asset type data.</p>';
+
+  const topVulnerableAssets = (assetStats.topVulnerable || [])
+    .slice(0, 5)
+    .map((asset) => {
+      const name = asset.display_name || asset.id || 'Unknown';
+      const vulnCount = formatNumber(asset.vulnerability_count || 0);
+      const criticalBadge = asset.critical_count > 0 ? ` <span style="color: #ff4444;">(${asset.critical_count} critical)</span>` : '';
+      return `<div class="list-item"><span>${name}</span><strong>${vulnCount}${criticalBadge}</strong></div>`;
+    })
+    .join('') || '<p>No vulnerable assets.</p>';
+
   elements.statistics.innerHTML = `
     <div class="stat-grid">
       <div class="stat-card">
@@ -342,6 +368,39 @@ const renderStatistics = (stats) => {
       <h3>Average CVSS by Severity</h3>
       <div class="list-group">${averageList}</div>
     </div>
+    ${assetStats.total > 0 ? `
+      <div style="margin-top: 2rem; padding-top: 2rem; border-top: 1px solid var(--border-color);">
+        <h2 style="margin-bottom: 1rem;">Vulnerable Assets Statistics</h2>
+        <div class="stat-grid">
+          <div class="stat-card">
+            <h3>Total Vulnerable Assets</h3>
+            <strong>${formatNumber(assetStats.total)}</strong>
+          </div>
+          <div class="stat-card">
+            <h3>Average Vulnerabilities per Asset</h3>
+            <strong>${assetStats.averageVulnerabilitiesPerAsset ? assetStats.averageVulnerabilitiesPerAsset.toFixed(1) : '0'}</strong>
+          </div>
+          <div class="stat-card">
+            <h3>Assets with Critical Vulnerabilities</h3>
+            <strong>${formatNumber(assetStats.withCriticalVulnerabilities)}</strong>
+          </div>
+          <div class="stat-card">
+            <h3>Assets with High Vulnerabilities</h3>
+            <strong>${formatNumber(assetStats.withHighVulnerabilities)}</strong>
+          </div>
+        </div>
+        <div class="grid two-columns" style="margin-top: 1.5rem; gap: 1.5rem;">
+          <div>
+            <h3>Assets by Type</h3>
+            <div class="list-group">${assetTypeList}</div>
+          </div>
+          <div>
+            <h3>Top Vulnerable Assets</h3>
+            <div class="list-group">${topVulnerableAssets}</div>
+          </div>
+        </div>
+      </div>
+    ` : ''}
   `;
 };
 
@@ -762,6 +821,10 @@ const getFiltersFromInputs = () => ({
   fixable: elements.fixable.value,
   integration: elements.integration.value.trim(),
   assetId: elements.assetId.value.trim(),
+  assetName: elements.assetName.value.trim(),
+  assetOwner: elements.assetOwner.value.trim(),
+  assetDomain: elements.assetDomain.value.trim(),
+  assetType: elements.assetType.value.trim(),
   cve: elements.cve.value.trim(),
   dateIdentifiedStart: toISODate(elements.dateIdentifiedStart.value),
   dateIdentifiedEnd: toISODate(elements.dateIdentifiedEnd.value),
@@ -777,6 +840,10 @@ const populateFilterInputs = () => {
   elements.fixable.value = state.filters.fixable;
   elements.integration.value = state.filters.integration;
   elements.assetId.value = state.filters.assetId;
+  elements.assetName.value = state.filters.assetName || '';
+  elements.assetOwner.value = state.filters.assetOwner || '';
+  elements.assetDomain.value = state.filters.assetDomain || '';
+  elements.assetType.value = state.filters.assetType || '';
   elements.cve.value = state.filters.cve;
   elements.dateIdentifiedStart.value = state.filters.dateIdentifiedStart ? state.filters.dateIdentifiedStart.slice(0, 10) : '';
   elements.dateIdentifiedEnd.value = state.filters.dateIdentifiedEnd ? state.filters.dateIdentifiedEnd.slice(0, 10) : '';
@@ -843,7 +910,7 @@ const loadAssets = async () => {
 
     // Fetch fresh data
     elements.assetList.innerHTML = '<li style="padding: 2rem; text-align: center;">Loading assets...</li>';
-    state.assets = await window.vanta.getAssets(state.filters);
+    state.assets = await window.vanta.getVulnerableAssets(state.filters);
 
     // Update cache
     state.assetCache = state.assets;
