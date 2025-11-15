@@ -1304,6 +1304,11 @@ class VulnerabilityDatabase {
     // Get asset statistics from vulnerable_assets table
     const assetStats = this._getAssetStatistics();
 
+    // Get vulnerable assets count from the vulnerable_assets table (for backward compatibility)
+    const vulnerableAssetsCount = this.db.prepare(
+      'SELECT COUNT(*) as count FROM vulnerable_assets'
+    ).get()?.count ?? 0;
+
     return {
       totalCount: total,
       bySeverity,
@@ -1318,6 +1323,7 @@ class VulnerabilityDatabase {
       averageCvssBySeverity,
       lastSync: lastSync?.sync_date ?? null,
       remediations: remediationStats,
+      totalVulnerableAssets: vulnerableAssetsCount,
       assets: assetStats,
     };
   }

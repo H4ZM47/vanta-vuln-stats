@@ -790,6 +790,47 @@ test('getStatistics with filters correctly correlates remediations', () => {
   }
 });
 
+test('getStatistics includes vulnerable assets count', () => {
+  const db = createTempDb();
+
+  try {
+    // Create some vulnerabilities
+    const vulnerabilities = [
+      { id: 'v-1', name: 'CVE-2024-001', severity: 'HIGH', targetId: 'asset-1' },
+      { id: 'v-2', name: 'CVE-2024-002', severity: 'MEDIUM', targetId: 'asset-2' },
+    ];
+    db.storeVulnerabilitiesBatch(vulnerabilities);
+
+    // Create vulnerable assets
+    const assets = [
+      {
+        id: 'asset-1',
+        name: 'server-1',
+        vulnerabilityCounts: { total: 5, critical: 1, high: 2, medium: 2, low: 0 },
+      },
+      {
+        id: 'asset-2',
+        name: 'server-2',
+        vulnerabilityCounts: { total: 3, critical: 0, high: 1, medium: 2, low: 0 },
+      },
+      {
+        id: 'asset-3',
+        name: 'server-3',
+        vulnerabilityCounts: { total: 1, critical: 0, high: 0, medium: 1, low: 0 },
+      },
+    ];
+    db.storeVulnerableAssetsBatch(assets);
+
+    // Get statistics
+    const stats = db.getStatistics();
+
+    // Verify vulnerable assets count is included
+    assert.equal(stats.totalVulnerableAssets, 3, 'Should have 3 vulnerable assets in statistics');
+  } finally {
+    cleanupDb(db);
+  }
+});
+
 test('active status filter uses remediation-based classification', () => {
   const db = createTempDb();
 
