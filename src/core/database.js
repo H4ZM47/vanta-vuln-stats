@@ -1125,6 +1125,43 @@ class VulnerabilityDatabase {
       params.dateRemediatedEnd = filters.dateRemediatedEnd;
     }
 
+    // Asset-based filters using EXISTS subqueries with vulnerable_assets and assets tables
+    if (filters.assetName) {
+      clauses.push(`EXISTS (
+        SELECT 1 FROM vulnerable_assets va
+        WHERE va.id = ${column('target_id')}
+        AND va.display_name LIKE @assetName
+      )`);
+      params.assetName = `%${filters.assetName}%`;
+    }
+
+    if (filters.assetOwner) {
+      clauses.push(`EXISTS (
+        SELECT 1 FROM assets a
+        WHERE a.id = ${column('target_id')}
+        AND (a.primary_owner LIKE @assetOwner OR a.owners LIKE @assetOwner)
+      )`);
+      params.assetOwner = `%${filters.assetOwner}%`;
+    }
+
+    if (filters.assetDomain) {
+      // Extract domain from asset metadata or external_identifier
+      // This searches in both vulnerable_assets and assets tables
+      clauses.push(`(
+        EXISTS (
+          SELECT 1 FROM vulnerable_assets va
+          WHERE va.id = ${column('target_id')}
+          AND (va.display_name LIKE @assetDomain OR va.metadata LIKE @assetDomain)
+        )
+        OR EXISTS (
+          SELECT 1 FROM assets a
+          WHERE a.id = ${column('target_id')}
+          AND (a.external_identifier LIKE @assetDomain OR a.tags LIKE @assetDomain)
+        )
+      )`);
+      params.assetDomain = `%${filters.assetDomain}%`;
+    }
+
     const where = clauses.length ? `WHERE ${clauses.join(' AND ')}` : '';
     return { where, params };
   }

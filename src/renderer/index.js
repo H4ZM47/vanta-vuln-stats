@@ -99,6 +99,9 @@ const elements = {
   fixable: document.getElementById('fixable'),
   integration: document.getElementById('integration'),
   assetId: document.getElementById('assetId'),
+  assetOwner: document.getElementById('assetOwner'),
+  assetDomain: document.getElementById('assetDomain'),
+  assetName: document.getElementById('assetName'),
   cve: document.getElementById('cve'),
   dateIdentifiedStart: document.getElementById('dateIdentifiedStart'),
   dateIdentifiedEnd: document.getElementById('dateIdentifiedEnd'),
@@ -137,6 +140,9 @@ const defaultFilters = () => ({
   fixable: 'any',
   integration: '',
   assetId: '',
+  assetOwner: '',
+  assetDomain: '',
+  assetName: '',
   cve: '',
   dateIdentifiedStart: '',
   dateIdentifiedEnd: '',
@@ -308,6 +314,53 @@ const renderStatistics = (stats) => {
     })
     .join('') || '<p>No CVSS scores recorded.</p>';
 
+  // Asset statistics
+  let assetStatsHtml = '';
+  if (stats.assets && stats.assets.total > 0) {
+    const assetTypeList = stats.assets.byType
+      .slice(0, 8)
+      .map((item) => `<div class="list-item"><span>${item.label}</span><strong>${formatNumber(item.count)} (${item.percentage})</strong></div>`)
+      .join('') || '<p>No asset type data.</p>';
+
+    const topVulnerableList = stats.assets.topVulnerable
+      .slice(0, 10)
+      .map((item) => `<div class="list-item"><span>${escapeHtml(item.name)}</span><strong>${formatNumber(item.vulnerabilityCount)} vulns (${formatNumber(item.criticalAndHigh)} critical/high)</strong></div>`)
+      .join('') || '<p>No vulnerable assets.</p>';
+
+    assetStatsHtml = `
+      <div style="margin-top: 1.5rem; padding-top: 1.5rem; border-top: 1px solid rgba(148, 163, 184, 0.2);">
+        <h2 style="margin-bottom: 1rem;">Vulnerable Assets</h2>
+        <div class="stat-grid">
+          <div class="stat-card">
+            <h3>Total Vulnerable Assets</h3>
+            <strong>${formatNumber(stats.assets.total)}</strong>
+            <p>Average ${stats.assets.averageVulnerabilitiesPerAsset.toFixed(1)} vulnerabilities per asset</p>
+          </div>
+          <div class="stat-card">
+            <h3>Critical Risk Assets</h3>
+            <strong>${formatNumber(stats.assets.withCriticalVulnerabilities)} assets</strong>
+            <p>Assets with critical vulnerabilities</p>
+          </div>
+          <div class="stat-card">
+            <h3>High Risk Assets</h3>
+            <strong>${formatNumber(stats.assets.withHighVulnerabilities)} assets</strong>
+            <p>Assets with high severity vulnerabilities</p>
+          </div>
+        </div>
+        <div class="grid two-columns" style="margin-top: 1.5rem; gap: 1.5rem;">
+          <div>
+            <h3>Assets by Type</h3>
+            <div class="list-group">${assetTypeList}</div>
+          </div>
+          <div>
+            <h3>Top 10 Most Vulnerable Assets</h3>
+            <div class="list-group">${topVulnerableList}</div>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
   elements.statistics.innerHTML = `
     <div class="stat-grid">
       <div class="stat-card">
@@ -342,6 +395,7 @@ const renderStatistics = (stats) => {
       <h3>Average CVSS by Severity</h3>
       <div class="list-group">${averageList}</div>
     </div>
+    ${assetStatsHtml}
   `;
 };
 
@@ -459,8 +513,8 @@ const renderVulnerabilities = () => {
       const severityClass = item.severity ? `severity-chip ${item.severity}` : '';
       const isSelected = state.selectedId === item.id ? 'selected' : '';
       const assetDisplay = item.asset_name
-        ? `<div>${escapeHtml(item.asset_name)}</div><span class="table-subtext">${escapeHtml(item.target_id || '—')}</span>`
-        : escapeHtml(item.target_id || '—');
+        ? `<div><a href="#" class="asset-link" data-asset-id="${escapeHtml(item.target_id)}" style="color: #60a5fa; text-decoration: none;">${escapeHtml(item.asset_name)}</a></div><span class="table-subtext">${escapeHtml(item.target_id || '—')}</span>`
+        : (item.target_id ? `<a href="#" class="asset-link" data-asset-id="${escapeHtml(item.target_id)}" style="color: #60a5fa; text-decoration: none;">${escapeHtml(item.target_id)}</a>` : '—');
       const externalUrlDisplay = item.external_url
         ? `<a href="${escapeHtml(item.external_url)}" target="_blank" rel="noopener noreferrer">View</a>`
         : '—';
@@ -762,6 +816,9 @@ const getFiltersFromInputs = () => ({
   fixable: elements.fixable.value,
   integration: elements.integration.value.trim(),
   assetId: elements.assetId.value.trim(),
+  assetOwner: elements.assetOwner.value.trim(),
+  assetDomain: elements.assetDomain.value.trim(),
+  assetName: elements.assetName.value.trim(),
   cve: elements.cve.value.trim(),
   dateIdentifiedStart: toISODate(elements.dateIdentifiedStart.value),
   dateIdentifiedEnd: toISODate(elements.dateIdentifiedEnd.value),
@@ -777,6 +834,9 @@ const populateFilterInputs = () => {
   elements.fixable.value = state.filters.fixable;
   elements.integration.value = state.filters.integration;
   elements.assetId.value = state.filters.assetId;
+  elements.assetOwner.value = state.filters.assetOwner;
+  elements.assetDomain.value = state.filters.assetDomain;
+  elements.assetName.value = state.filters.assetName;
   elements.cve.value = state.filters.cve;
   elements.dateIdentifiedStart.value = state.filters.dateIdentifiedStart ? state.filters.dateIdentifiedStart.slice(0, 10) : '';
   elements.dateIdentifiedEnd.value = state.filters.dateIdentifiedEnd ? state.filters.dateIdentifiedEnd.slice(0, 10) : '';
@@ -1617,6 +1677,27 @@ const attachEventListeners = () => {
   });
 
   elements.vulnerabilityTable.addEventListener('click', handleTableClick);
+
+  // Add event delegation for asset links in vulnerability table
+  elements.vulnerabilityTable.addEventListener('click', async (event) => {
+    const assetLink = event.target.closest('a.asset-link');
+    if (!assetLink) return;
+
+    event.preventDefault();
+    const assetId = assetLink.getAttribute('data-asset-id');
+    if (!assetId) return;
+
+    // Switch to the by-asset explorer tab
+    switchExplorerTab('by-asset');
+
+    // Load assets if not already loaded
+    if (!state.assets.length) {
+      await loadAssets();
+    }
+
+    // Select the asset
+    await selectAsset(assetId);
+  });
 
   // Attach column sort handlers
   document.querySelectorAll('.data-table thead th.sortable').forEach((th) => {
