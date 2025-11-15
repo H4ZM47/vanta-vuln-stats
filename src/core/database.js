@@ -310,6 +310,7 @@ class VulnerabilityDatabase {
     this.db.exec('CREATE INDEX IF NOT EXISTS idx_assets_integration ON assets(integration_id);');
     this.db.exec('CREATE INDEX IF NOT EXISTS idx_assets_type ON assets(asset_type);');
     this.db.exec('CREATE INDEX IF NOT EXISTS idx_assets_name ON assets(name);');
+    this.db.exec('CREATE INDEX IF NOT EXISTS idx_vulnerable_assets_id ON vulnerable_assets(id);');
     this.db.exec('CREATE INDEX IF NOT EXISTS idx_vulnerable_assets_type ON vulnerable_assets(asset_type);');
     this.db.exec('CREATE INDEX IF NOT EXISTS idx_vulnerable_assets_integration ON vulnerable_assets(integration_id);');
     this.db.exec('CREATE INDEX IF NOT EXISTS idx_vulnerable_assets_vuln_count ON vulnerable_assets(vulnerability_count);');
@@ -1051,7 +1052,10 @@ class VulnerabilityDatabase {
 
   buildFilters(filters = {}, options = {}) {
     const alias = options.alias ?? null;
-    const tableRef = alias || options.tableRef || 'vulnerabilities';
+    const unsafeTableRef = alias || options.tableRef || 'vulnerabilities';
+    // Validate tableRef to prevent SQL injection
+    const validTableRefs = ['vulnerabilities', 'v', 'vulnerability_remediations', 'vr'];
+    const tableRef = validTableRefs.includes(unsafeTableRef) ? unsafeTableRef : 'vulnerabilities';
     const column = (name) => `${tableRef}.${name}`;
     const clauses = [];
     const params = {};
@@ -1093,6 +1097,42 @@ class VulnerabilityDatabase {
     if (filters.assetId) {
       clauses.push(`${column('target_id')} = @assetId`);
       params.assetId = filters.assetId;
+    }
+
+    if (filters.assetName) {
+      clauses.push(`EXISTS (
+        SELECT 1 FROM vulnerable_assets va
+        WHERE va.id = ${tableRef}.target_id
+        AND va.display_name LIKE @assetName
+      )`);
+      params.assetName = `%${filters.assetName}%`;
+    }
+
+    if (filters.assetOwner) {
+      clauses.push(`EXISTS (
+        SELECT 1 FROM assets a
+        WHERE a.id = ${tableRef}.target_id
+        AND a.primary_owner LIKE @assetOwner
+      )`);
+      params.assetOwner = `%${filters.assetOwner}%`;
+    }
+
+    if (filters.assetDomain) {
+      clauses.push(`EXISTS (
+        SELECT 1 FROM assets a
+        WHERE a.id = ${tableRef}.target_id
+        AND a.external_identifier LIKE @assetDomain
+      )`);
+      params.assetDomain = `%${filters.assetDomain}%`;
+    }
+
+    if (filters.assetType) {
+      clauses.push(`EXISTS (
+        SELECT 1 FROM vulnerable_assets va
+        WHERE va.id = ${tableRef}.target_id
+        AND va.asset_type LIKE @assetType
+      )`);
+      params.assetType = `%${filters.assetType}%`;
     }
 
     if (filters.cve) {
