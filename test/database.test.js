@@ -1928,3 +1928,54 @@ test('getStatistics asset filters work independently from vulnerability filters'
     cleanupDb(db);
   }
 });
+
+test('getStatistics vulnerability search does not affect asset statistics', () => {
+  const db = createTempDb();
+
+  try {
+    // Create vulnerabilities with specific CVE names
+    const vulnerabilities = [
+      { id: 'v-1', name: 'CVE-2024-1234', severity: 'CRITICAL' },
+      { id: 'v-2', name: 'CVE-2024-5678', severity: 'HIGH' },
+      { id: 'v-3', name: 'CVE-2024-9999', severity: 'MEDIUM' },
+    ];
+    db.storeVulnerabilitiesBatch(vulnerabilities);
+
+    // Create vulnerable assets with names that don't match CVE search
+    const assets = [
+      {
+        id: 'asset-1',
+        name: 'production-server',
+        assetType: 'SERVER',
+        vulnerabilityCounts: { total: 10, critical: 2, high: 3, medium: 5, low: 0 },
+      },
+      {
+        id: 'asset-2',
+        name: 'staging-server',
+        assetType: 'SERVER',
+        vulnerabilityCounts: { total: 5, critical: 1, high: 2, medium: 2, low: 0 },
+      },
+      {
+        id: 'asset-3',
+        name: 'test-workstation',
+        assetType: 'WORKSTATION',
+        vulnerabilityCounts: { total: 3, critical: 0, high: 1, medium: 2, low: 0 },
+      },
+    ];
+    db.storeVulnerableAssetsBatch(assets);
+
+    // Search for a specific CVE (vulnerability search)
+    const stats = db.getStatistics({ search: 'CVE-2024-1234' });
+
+    // Vulnerability stats should be filtered by search
+    assert.equal(stats.totalCount, 1, 'Should only count vulnerabilities matching search');
+
+    // Asset stats should NOT be filtered by vulnerability search term
+    assert.equal(stats.assets.total, 3, 'Should count all assets (search should not affect assets)');
+    assert.equal(stats.assets.byType.SERVER, 2, 'Should have 2 SERVER assets');
+    assert.equal(stats.assets.byType.WORKSTATION, 1, 'Should have 1 WORKSTATION asset');
+    assert.equal(stats.assets.topVulnerable.length, 3, 'Should have all 3 assets in top vulnerable');
+  } finally {
+    cleanupDb(db);
+  }
+});

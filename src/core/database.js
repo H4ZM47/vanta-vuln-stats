@@ -1301,8 +1301,20 @@ class VulnerabilityDatabase {
     // Get remediation statistics
     const remediationStats = this._getRemediationStatistics(where, params);
 
-    // Get asset statistics from vulnerable_assets table with filters applied
-    const assetStats = this._getAssetStatistics(filters);
+    // Extract only asset-specific filters (exclude vulnerability filters like search, severity, etc.)
+    const assetFilters = {
+      assetType: filters.assetType,
+      integrationId: filters.integrationId,
+      minVulnerabilityCount: filters.minVulnerabilityCount,
+      maxVulnerabilityCount: filters.maxVulnerabilityCount,
+      firstDetectedStart: filters.firstDetectedStart,
+      firstDetectedEnd: filters.firstDetectedEnd,
+      lastDetectedStart: filters.lastDetectedStart,
+      lastDetectedEnd: filters.lastDetectedEnd,
+    };
+
+    // Get asset statistics from vulnerable_assets table with asset-specific filters applied
+    const assetStats = this._getAssetStatistics(assetFilters);
 
     // Get vulnerable assets count from the vulnerable_assets table (for backward compatibility)
     const vulnerableAssetsCount = this.db.prepare(
