@@ -446,7 +446,7 @@ const renderSyncHistory = (history) => {
 
 const renderVulnerabilities = () => {
   if (!state.vulnerabilities.length) {
-    elements.vulnerabilityTable.innerHTML = '<tr><td colspan="7">No vulnerabilities match your filters.</td></tr>';
+    elements.vulnerabilityTable.innerHTML = '<tr><td colspan="8">No vulnerabilities match your filters.</td></tr>';
     return;
   }
 
@@ -461,6 +461,9 @@ const renderVulnerabilities = () => {
       const assetDisplay = item.asset_name
         ? `<div>${escapeHtml(item.asset_name)}</div><span class="table-subtext">${escapeHtml(item.target_id || '—')}</span>`
         : escapeHtml(item.target_id || '—');
+      const externalUrlDisplay = item.external_url
+        ? `<a href="${escapeHtml(item.external_url)}" target="_blank" rel="noopener noreferrer">View</a>`
+        : '—';
       return `
         <tr data-id="${item.id}" class="${isSelected}">
           <td>${escapeHtml(item.id)}</td>
@@ -470,6 +473,7 @@ const renderVulnerabilities = () => {
           <td>${assetDisplay}</td>
           <td>${formatDate(item.first_detected)}</td>
           <td><span class="${statusClass}">${statusIcon} ${statusLabel}</span></td>
+          <td>${externalUrlDisplay}</td>
         </tr>
       `;
     })
