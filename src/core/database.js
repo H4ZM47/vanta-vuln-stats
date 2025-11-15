@@ -1296,7 +1296,11 @@ class VulnerabilityDatabase {
   }
 
   getStatistics(filters = {}) {
-    const { where, params } = this.buildFilters(filters, { alias: 'v' });
+    // Separate vulnerability filters from asset filters
+    // Asset-specific filters (assetType, assetName, assetOwner, assetDomain) should NOT
+    // be applied to vulnerability statistics - they're only for asset statistics
+    const { assetType, assetName, assetOwner, assetDomain, ...vulnerabilityFilters } = filters;
+    const { where, params } = this.buildFilters(vulnerabilityFilters, { alias: 'v' });
 
     const total = this.db.prepare(`SELECT COUNT(*) as count FROM vulnerabilities v ${where};`).get(params)?.count ?? 0;
 
