@@ -12,6 +12,7 @@ class VantaApiClient {
     this.clientSecret = clientSecret;
     this.accessToken = null;
     this.tokenExpiresAt = null;
+    this.authenticationPromise = null; // Lock to prevent concurrent auth attempts
     this.http = axios.create({
       baseURL: BASE_URL,
       timeout: 120000,
@@ -27,6 +28,7 @@ class VantaApiClient {
       throw new Error('Client ID and secret are required before authenticating.');
     }
 
+    // Check if we have a valid cached token
     if (!force && this.accessToken && this.tokenExpiresAt) {
       const expiresIn = this.tokenExpiresAt - Date.now();
       if (expiresIn > 60_000) {
@@ -34,6 +36,30 @@ class VantaApiClient {
       }
     }
 
+    // If authentication is already in progress, wait for it to complete
+    if (this.authenticationPromise) {
+      try {
+        return await this.authenticationPromise;
+      } catch (error) {
+        // If the concurrent authentication failed, we'll retry below
+        // But first, clear the promise so we can try again
+        this.authenticationPromise = null;
+      }
+    }
+
+    // Create a new authentication promise to prevent concurrent attempts
+    this.authenticationPromise = this._performAuthentication();
+
+    try {
+      const token = await this.authenticationPromise;
+      return token;
+    } finally {
+      // Clear the promise after authentication completes (success or failure)
+      this.authenticationPromise = null;
+    }
+  }
+
+  async _performAuthentication(maxRetries = 5) {
     const payload = {
       client_id: this.clientId,
       client_secret: this.clientSecret,
@@ -41,29 +67,100 @@ class VantaApiClient {
       grant_type: 'client_credentials',
     };
 
-    const response = await axios.post(AUTH_URL, payload, {
-      headers: { 'Content-Type': 'application/json' },
-    });
+    let lastError;
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      try {
+        const response = await axios.post(AUTH_URL, payload, {
+          headers: { 'Content-Type': 'application/json' },
+          timeout: 30000, // 30 second timeout for auth requests
+        });
 
-    const { access_token: token, expires_in: expiresIn } = response.data;
-    if (!token) {
-      throw new Error('Authentication succeeded but returned no access token.');
+        const { access_token: token, expires_in: expiresIn } = response.data;
+        if (!token) {
+          throw new Error('Authentication succeeded but returned no access token.');
+        }
+
+        this.accessToken = token;
+        this.tokenExpiresAt = Date.now() + (expiresIn ? expiresIn * 1000 : 3_300_000);
+        this.http.defaults.headers.common.Authorization = `Bearer ${token}`;
+
+        // Log successful authentication after retries
+        if (attempt > 0) {
+          console.log(`[VantaApiClient] Successfully authenticated after ${attempt} retries`);
+        }
+
+        return token;
+      } catch (error) {
+        lastError = error;
+        const status = error?.response?.status;
+
+        // Handle different error scenarios
+        if (status === 429) {
+          // Rate limited - use exponential backoff with jitter
+          const retryAfter = Number(error.response?.headers?.['retry-after']) || 60;
+          const baseDelay = Math.max(retryAfter, 2 ** attempt) * 1000;
+          const jitter = Math.random() * 1000; // Add up to 1 second of jitter
+          const delay = baseDelay + jitter;
+
+          console.warn(
+            `[VantaApiClient] OAuth rate limited (429). Waiting ${Math.round(delay / 1000)}s before retry ${attempt + 1}/${maxRetries + 1}`
+          );
+
+          if (attempt < maxRetries) {
+            await sleep(delay);
+            continue;
+          }
+        } else if (status === 401) {
+          // Invalid credentials - don't retry
+          throw new Error(`Authentication failed: Invalid client credentials (401)`);
+        } else if (status && status >= 500) {
+          // Server error - exponential backoff
+          const delay = Math.min(30000, 1000 * (2 ** attempt));
+
+          console.warn(
+            `[VantaApiClient] OAuth server error (${status}). Waiting ${delay / 1000}s before retry ${attempt + 1}/${maxRetries + 1}`
+          );
+
+          if (attempt < maxRetries) {
+            await sleep(delay);
+            continue;
+          }
+        } else if (!status && attempt < maxRetries) {
+          // Network error - retry with backoff
+          const delay = Math.min(10000, 1000 * (2 ** attempt));
+
+          console.warn(
+            `[VantaApiClient] Network error during authentication. Waiting ${delay / 1000}s before retry ${attempt + 1}/${maxRetries + 1}`
+          );
+
+          await sleep(delay);
+          continue;
+        }
+
+        // If we've exhausted retries or hit an unrecoverable error, throw
+        if (attempt === maxRetries) {
+          throw new Error(
+            `Authentication failed after ${maxRetries + 1} attempts: ${lastError.message}`,
+            { cause: lastError }
+          );
+        }
+      }
     }
 
-    this.accessToken = token;
-    this.tokenExpiresAt = Date.now() + (expiresIn ? expiresIn * 1000 : 3_300_000);
-    this.http.defaults.headers.common.Authorization = `Bearer ${token}`;
-
-    return token;
+    throw lastError;
   }
 
   async requestWithRetry(config, retries = 5) {
     let attempt = 0;
-    // ensure token
-    await this.authenticate();
+    let authRetryCount = 0;
+    const maxAuthRetries = 2; // Limit authentication retries to avoid infinite loops
 
     while (attempt <= retries) {
       try {
+        // Ensure we have a valid token before making the request
+        await this.authenticate();
+
+        // Make the actual API request
         return await this.http.request(config);
       } catch (error) {
         // Check if request was aborted
@@ -72,22 +169,50 @@ class VantaApiClient {
         }
 
         const status = error?.response?.status;
+
+        // Handle 401 Unauthorized - token might have expired
         if (status === 401 && attempt < retries) {
+          authRetryCount++;
+          if (authRetryCount > maxAuthRetries) {
+            throw new Error('Authentication failed repeatedly. Please check your credentials.');
+          }
+
+          console.warn(`[VantaApiClient] Got 401, forcing re-authentication (attempt ${authRetryCount}/${maxAuthRetries})`);
+
+          // Force re-authentication
           await this.authenticate(true);
           attempt += 1;
           continue;
         }
+
+        // Handle 429 Too Many Requests - rate limited on regular API calls
         if (status === 429 && attempt < retries) {
-          const retryAfter = Number(error.response.headers['retry-after'] || 60);
-          await sleep((retryAfter + 1) * 1000);
+          const retryAfter = Number(error.response?.headers?.['retry-after']) || 60;
+          const delay = (retryAfter + 1) * 1000;
+
+          console.warn(
+            `[VantaApiClient] API rate limited (429) for ${config.url}. Waiting ${retryAfter + 1}s before retry ${attempt + 1}/${retries + 1}`
+          );
+
+          await sleep(delay);
           attempt += 1;
           continue;
         }
+
+        // Handle 5xx Server Errors - temporary issues
         if (status && status >= 500 && attempt < retries) {
-          await sleep(1_000 * Math.pow(2, attempt));
+          const delay = Math.min(30000, 1000 * Math.pow(2, attempt));
+
+          console.warn(
+            `[VantaApiClient] Server error (${status}) for ${config.url}. Waiting ${delay / 1000}s before retry ${attempt + 1}/${retries + 1}`
+          );
+
+          await sleep(delay);
           attempt += 1;
           continue;
         }
+
+        // If we've exhausted all retries or hit an unrecoverable error, throw
         throw error;
       }
     }
