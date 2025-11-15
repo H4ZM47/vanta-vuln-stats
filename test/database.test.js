@@ -1654,3 +1654,328 @@ test('getStatistics handles assets with null/unknown types and integrations', ()
     cleanupDb(db);
   }
 });
+
+// ============================================================================
+// Asset Statistics Filtering Tests
+// ============================================================================
+
+test('getStatistics filters asset statistics by asset type', () => {
+  const db = createTempDb();
+
+  try {
+    const assets = [
+      {
+        id: 'filter-server-1',
+        name: 'server-1',
+        assetType: 'SERVER',
+        integrationId: 'qualys',
+        vulnerabilityCounts: { total: 10, critical: 2, high: 3, medium: 5, low: 0 },
+      },
+      {
+        id: 'filter-server-2',
+        name: 'server-2',
+        assetType: 'SERVER',
+        integrationId: 'tenable',
+        vulnerabilityCounts: { total: 5, critical: 1, high: 2, medium: 2, low: 0 },
+      },
+      {
+        id: 'filter-workstation-1',
+        name: 'workstation-1',
+        assetType: 'WORKSTATION',
+        integrationId: 'qualys',
+        vulnerabilityCounts: { total: 3, critical: 0, high: 1, medium: 2, low: 0 },
+      },
+    ];
+
+    db.storeVulnerableAssetsBatch(assets);
+
+    const stats = db.getStatistics({ assetType: 'SERVER' });
+
+    assert.equal(stats.assets.total, 2, 'Should only count SERVER assets');
+    assert.equal(stats.assets.byType.SERVER, 2, 'byType should only have SERVER');
+    assert.equal(stats.assets.byType.WORKSTATION, undefined, 'byType should not have WORKSTATION');
+    assert.equal(stats.assets.topVulnerable.length, 2, 'topVulnerable should only have 2 assets');
+  } finally {
+    cleanupDb(db);
+  }
+});
+
+test('getStatistics filters asset statistics by integration ID', () => {
+  const db = createTempDb();
+
+  try {
+    const assets = [
+      {
+        id: 'filter-qualys-1',
+        name: 'qualys-server',
+        assetType: 'SERVER',
+        integrationId: 'qualys',
+        vulnerabilityCounts: { total: 10, critical: 2, high: 3, medium: 5, low: 0 },
+      },
+      {
+        id: 'filter-qualys-2',
+        name: 'qualys-workstation',
+        assetType: 'WORKSTATION',
+        integrationId: 'qualys',
+        vulnerabilityCounts: { total: 5, critical: 1, high: 2, medium: 2, low: 0 },
+      },
+      {
+        id: 'filter-tenable-1',
+        name: 'tenable-server',
+        assetType: 'SERVER',
+        integrationId: 'tenable',
+        vulnerabilityCounts: { total: 8, critical: 1, high: 3, medium: 4, low: 0 },
+      },
+    ];
+
+    db.storeVulnerableAssetsBatch(assets);
+
+    const stats = db.getStatistics({ integrationId: 'qualys' });
+
+    assert.equal(stats.assets.total, 2, 'Should only count qualys assets');
+    assert.equal(stats.assets.byIntegration.qualys, 2, 'byIntegration should only have qualys');
+    assert.equal(stats.assets.byIntegration.tenable, undefined, 'byIntegration should not have tenable');
+    const expectedAvg = (10 + 5) / 2; // 7.5
+    assert.ok(Math.abs(stats.assets.averageVulnerabilitiesPerAsset - expectedAvg) < 0.01,
+      'Average should be calculated from filtered assets only');
+  } finally {
+    cleanupDb(db);
+  }
+});
+
+test('getStatistics filters asset statistics by vulnerability count range', () => {
+  const db = createTempDb();
+
+  try {
+    const assets = [
+      {
+        id: 'filter-high-count',
+        name: 'high-vulns',
+        vulnerabilityCounts: { total: 50, critical: 10, high: 20, medium: 20, low: 0 },
+      },
+      {
+        id: 'filter-medium-count',
+        name: 'medium-vulns',
+        vulnerabilityCounts: { total: 10, critical: 2, high: 3, medium: 5, low: 0 },
+      },
+      {
+        id: 'filter-low-count',
+        name: 'low-vulns',
+        vulnerabilityCounts: { total: 2, critical: 0, high: 1, medium: 1, low: 0 },
+      },
+    ];
+
+    db.storeVulnerableAssetsBatch(assets);
+
+    const stats = db.getStatistics({ minVulnerabilityCount: 5, maxVulnerabilityCount: 15 });
+
+    assert.equal(stats.assets.total, 1, 'Should only count assets with vulnerability count between 5 and 15');
+    assert.equal(stats.assets.topVulnerable[0].id, 'filter-medium-count', 'Should only include medium count asset');
+    assert.equal(stats.assets.averageVulnerabilitiesPerAsset, 10, 'Average should be 10');
+  } finally {
+    cleanupDb(db);
+  }
+});
+
+test('getStatistics filters asset statistics by date range', () => {
+  const db = createTempDb();
+
+  try {
+    const assets = [
+      {
+        id: 'filter-old-asset',
+        name: 'old-asset',
+        vulnerabilityCounts: { total: 10, critical: 2, high: 3, medium: 5, low: 0 },
+        firstDetected: '2024-01-01T00:00:00.000Z',
+        lastDetected: '2024-01-15T00:00:00.000Z',
+      },
+      {
+        id: 'filter-recent-asset',
+        name: 'recent-asset',
+        vulnerabilityCounts: { total: 5, critical: 1, high: 2, medium: 2, low: 0 },
+        firstDetected: '2024-02-01T00:00:00.000Z',
+        lastDetected: '2024-02-15T00:00:00.000Z',
+      },
+      {
+        id: 'filter-newest-asset',
+        name: 'newest-asset',
+        vulnerabilityCounts: { total: 8, critical: 2, high: 3, medium: 3, low: 0 },
+        firstDetected: '2024-03-01T00:00:00.000Z',
+        lastDetected: '2024-03-15T00:00:00.000Z',
+      },
+    ];
+
+    db.storeVulnerableAssetsBatch(assets);
+
+    // Filter by first detected date range
+    const statsFirstDetected = db.getStatistics({
+      firstDetectedStart: '2024-02-01T00:00:00.000Z',
+      firstDetectedEnd: '2024-02-28T23:59:59.999Z',
+    });
+
+    assert.equal(statsFirstDetected.assets.total, 1, 'Should only count assets first detected in February');
+    assert.equal(statsFirstDetected.assets.topVulnerable[0].id, 'filter-recent-asset', 'Should be the February asset');
+
+    // Filter by last detected date range
+    const statsLastDetected = db.getStatistics({
+      lastDetectedStart: '2024-02-01T00:00:00.000Z',
+    });
+
+    assert.equal(statsLastDetected.assets.total, 2, 'Should count assets last detected on or after Feb 1');
+    assert.equal(statsLastDetected.assets.topVulnerable.length, 2, 'Should have 2 assets in top vulnerable');
+  } finally {
+    cleanupDb(db);
+  }
+});
+
+test('getStatistics filters asset statistics by multiple criteria', () => {
+  const db = createTempDb();
+
+  try {
+    const assets = [
+      {
+        id: 'multi-filter-1',
+        name: 'qualys-server-high',
+        assetType: 'SERVER',
+        integrationId: 'qualys',
+        vulnerabilityCounts: { total: 50, critical: 10, high: 20, medium: 20, low: 0 },
+        firstDetected: '2024-02-01T00:00:00.000Z',
+      },
+      {
+        id: 'multi-filter-2',
+        name: 'qualys-server-low',
+        assetType: 'SERVER',
+        integrationId: 'qualys',
+        vulnerabilityCounts: { total: 5, critical: 1, high: 2, medium: 2, low: 0 },
+        firstDetected: '2024-02-05T00:00:00.000Z',
+      },
+      {
+        id: 'multi-filter-3',
+        name: 'tenable-server-high',
+        assetType: 'SERVER',
+        integrationId: 'tenable',
+        vulnerabilityCounts: { total: 45, critical: 8, high: 18, medium: 19, low: 0 },
+        firstDetected: '2024-02-10T00:00:00.000Z',
+      },
+      {
+        id: 'multi-filter-4',
+        name: 'qualys-workstation',
+        assetType: 'WORKSTATION',
+        integrationId: 'qualys',
+        vulnerabilityCounts: { total: 40, critical: 5, high: 15, medium: 20, low: 0 },
+        firstDetected: '2024-02-15T00:00:00.000Z',
+      },
+    ];
+
+    db.storeVulnerableAssetsBatch(assets);
+
+    // Filter by: type=SERVER, integration=qualys, minVulnerabilityCount=10, firstDetectedStart=2024-02-01
+    const stats = db.getStatistics({
+      assetType: 'SERVER',
+      integrationId: 'qualys',
+      minVulnerabilityCount: 10,
+      firstDetectedStart: '2024-02-01T00:00:00.000Z',
+    });
+
+    assert.equal(stats.assets.total, 1, 'Should only match one asset with all criteria');
+    assert.equal(stats.assets.topVulnerable[0].id, 'multi-filter-1', 'Should be the qualys server with high count');
+    assert.equal(stats.assets.byType.SERVER, 1, 'Should only have SERVER type');
+    assert.equal(stats.assets.byIntegration.qualys, 1, 'Should only have qualys integration');
+  } finally {
+    cleanupDb(db);
+  }
+});
+
+test('getStatistics asset filters work independently from vulnerability filters', () => {
+  const db = createTempDb();
+
+  try {
+    // Create vulnerabilities
+    const vulnerabilities = [
+      { id: 'v-1', name: 'CVE-2024-001', severity: 'CRITICAL' },
+      { id: 'v-2', name: 'CVE-2024-002', severity: 'HIGH' },
+      { id: 'v-3', name: 'CVE-2024-003', severity: 'MEDIUM' },
+    ];
+    db.storeVulnerabilitiesBatch(vulnerabilities);
+
+    // Create vulnerable assets
+    const assets = [
+      {
+        id: 'independent-server',
+        name: 'server',
+        assetType: 'SERVER',
+        vulnerabilityCounts: { total: 10, critical: 2, high: 3, medium: 5, low: 0 },
+      },
+      {
+        id: 'independent-workstation',
+        name: 'workstation',
+        assetType: 'WORKSTATION',
+        vulnerabilityCounts: { total: 5, critical: 1, high: 2, medium: 2, low: 0 },
+      },
+    ];
+    db.storeVulnerableAssetsBatch(assets);
+
+    // Apply vulnerability filter (severity=CRITICAL) and asset filter (assetType=SERVER)
+    const stats = db.getStatistics({ severity: ['CRITICAL'], assetType: 'SERVER' });
+
+    // Vulnerability stats should be filtered by severity
+    assert.equal(stats.totalCount, 1, 'Should only count CRITICAL vulnerabilities');
+
+    // Asset stats should be filtered by asset type (independent of vulnerability filter)
+    assert.equal(stats.assets.total, 1, 'Should only count SERVER assets');
+    assert.equal(stats.assets.topVulnerable[0].id, 'independent-server', 'Should only include SERVER');
+  } finally {
+    cleanupDb(db);
+  }
+});
+
+test('getStatistics vulnerability search does not affect asset statistics', () => {
+  const db = createTempDb();
+
+  try {
+    // Create vulnerabilities with specific CVE names
+    const vulnerabilities = [
+      { id: 'v-1', name: 'CVE-2024-1234', severity: 'CRITICAL' },
+      { id: 'v-2', name: 'CVE-2024-5678', severity: 'HIGH' },
+      { id: 'v-3', name: 'CVE-2024-9999', severity: 'MEDIUM' },
+    ];
+    db.storeVulnerabilitiesBatch(vulnerabilities);
+
+    // Create vulnerable assets with names that don't match CVE search
+    const assets = [
+      {
+        id: 'asset-1',
+        name: 'production-server',
+        assetType: 'SERVER',
+        vulnerabilityCounts: { total: 10, critical: 2, high: 3, medium: 5, low: 0 },
+      },
+      {
+        id: 'asset-2',
+        name: 'staging-server',
+        assetType: 'SERVER',
+        vulnerabilityCounts: { total: 5, critical: 1, high: 2, medium: 2, low: 0 },
+      },
+      {
+        id: 'asset-3',
+        name: 'test-workstation',
+        assetType: 'WORKSTATION',
+        vulnerabilityCounts: { total: 3, critical: 0, high: 1, medium: 2, low: 0 },
+      },
+    ];
+    db.storeVulnerableAssetsBatch(assets);
+
+    // Search for a specific CVE (vulnerability search)
+    const stats = db.getStatistics({ search: 'CVE-2024-1234' });
+
+    // Vulnerability stats should be filtered by search
+    assert.equal(stats.totalCount, 1, 'Should only count vulnerabilities matching search');
+
+    // Asset stats should NOT be filtered by vulnerability search term
+    assert.equal(stats.assets.total, 3, 'Should count all assets (search should not affect assets)');
+    assert.equal(stats.assets.byType.SERVER, 2, 'Should have 2 SERVER assets');
+    assert.equal(stats.assets.byType.WORKSTATION, 1, 'Should have 1 WORKSTATION asset');
+    assert.equal(stats.assets.topVulnerable.length, 3, 'Should have all 3 assets in top vulnerable');
+  } finally {
+    cleanupDb(db);
+  }
+});
