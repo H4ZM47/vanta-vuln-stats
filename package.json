@@ -36,7 +36,7 @@
   "devDependencies": {
     "@types/jest": "^30.0.0",
     "electron": "^35.7.5",
-    "electron-builder": "^24.13.3",
+    "electron-builder": "^26.7.0",
     "jest": "^30.2.0"
   },
   "dependencies": {
